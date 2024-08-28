@@ -2,6 +2,7 @@ import logging
 import ctypes
 import keyboard 
 import pygetwindow as gw
+import pymem
 from dataclasses import dataclass, field
 
 import nmspy.data.functions.hooks as hooks
@@ -21,6 +22,7 @@ import nmspy.data.engine as engine
 from pymhf.gui.gui import GUI
 from pymhf.core._types import FUNCDEF
 from nmspy.data.functions.call_sigs import FUNC_CALL_SIGS
+from pymhf.core.utils import set_main_window_focus
 #from nmspy.data import engine as engine, common, structs as nms_structs, local_types as lt
 
 class Window:
@@ -253,17 +255,21 @@ class WaypointManagerMod(NMSMod):
     def toggle_window_focus(self):
         #logging.info(f'{keyboard._os_keyboard.from_name}')
         logging.info(f'F1 key pressed\n')
-        self.toggle_gui_and_game()
+        set_main_window_focus()
+        #self.toggle_gui_and_game()
 
     @on_key_pressed("j")
     def press_f(self):
         logging.info("J key pressed")
-        if keyboard.is_pressed('f'):
-            logging.info("release f")
-            keyboard.release('f')
-        else:
-            logging.info("press f")
-            keyboard.press('f')
+
+        set_main_window_focus()
+        #logging.info(f'{pymem.Pymem(EXE_NAME).process_handle}')
+        #if keyboard.is_pressed('f'):
+        #    logging.info("release f")
+        #    keyboard.release('f')
+        #else:
+        #    logging.info("press f")
+        #    keyboard.press('f')
 
 #-----------------------------------------------------------------GUI Elements-------------------------------------------------------------------------#
     
