@@ -3,6 +3,7 @@ import ctypes
 import keyboard 
 import pygetwindow as gw
 import pymem
+from typing import Optional
 from dataclasses import dataclass, field
 
 import nmspy.data.functions.hooks as hooks
@@ -23,6 +24,7 @@ from pymhf.gui.gui import GUI
 from pymhf.core._types import FUNCDEF
 from nmspy.data.functions.call_sigs import FUNC_CALL_SIGS
 from pymhf.core.utils import set_main_window_focus
+from nmspy.data.common import TkHandle, Vector3f, cTkMatrix34
 #from nmspy.data import engine as engine, common, structs as nms_structs, local_types as lt
 
 class Window:
@@ -81,6 +83,7 @@ class Window:
 
 @dataclass
 class State_Vars(ModState):
+    application: nms_structs.cGcApplication = None
     binoculars: nms_structs.cGcBinoculars = None
     playerEnv: nms_structs.cGcPlayerEnvironment = None
     inputPort: nms_structs.cTkInputPort = None
@@ -113,20 +116,25 @@ class WaypointManagerMod(NMSMod):
         #self.last_saved_flag = False
         self.fallingMarker = False
         #self.gui_storage = gui
-        self.test_press = False
+        self.test_press: bool = False
         self.nms_window = Window("No Man's Sky")
         self.gui_window = Window("pyMHF")
 
     @on_state_change("APPVIEW")
     def init_state_var(self):
-        try:
+        logging.info("Setting State Vars")
+        """ try:
             self.loadJson()
         except Exception as e:
             logging.exception(e)
         logging.info(f'wpDict: {self.state.wpDict}')
-        """ self.state.playerEnv = nms.GcApplication.data.contents.Simulation.environment.playerEnvironment        
         sim_addr = ctypes.addressof(nms.GcApplication.data.contents.Simulation)
         self.state.binoculars = map_struct(sim_addr + 74160 + 6624, nms_structs.cGcBinoculars) """
+        try:
+            self.state.playerEnv = nms.GcApplication.data.contents.Simulation.environment.playerEnvironment 
+        except Exception as e:
+            logging.info("Unable to store playerEnv")
+            logging.exception(e)
         self.nms_window = Window("No Man's Sky")
         self.nms_window.storeWindow()
         self.gui_window = Window("pyMHF")
@@ -138,11 +146,12 @@ class WaypointManagerMod(NMSMod):
 
     @manual_hook(
         "cGcApplication::Update",
-        0x26C710,
-            func_def=FUNCDEF(
-                restype=ctypes.c_ulonglong,
-                argtypes=[]
-            ),
+        #0x26C710,
+        pattern="40 53 48 83 EC 20 E8 ?? ?? ?? ?? 48 89",
+        func_def=FUNCDEF(
+            restype=ctypes.c_ulonglong,
+            argtypes=[]
+        ),
         detour_time="after",
     ) #@main_loop.after
     def do_something(self):
@@ -180,12 +189,14 @@ class WaypointManagerMod(NMSMod):
                 keyboard.press_and_release('f')
                 self.test_press = False
                 #self.callSetButton()
-                
+   
+
 
 
     @manual_hook(
             "cGcAtmosphereEntryComponent::ActiveAtmosphereEntry",
-            0xD63F50,
+            #0xD63F50,
+            pattern="48 89 5C 24 08 57 48 81 EC 80 00 00 00 65 48 8B 04 25 58 00 00 00 48 8B D9",
             func_def=FUNCDEF(
                 restype=ctypes.c_int64,
                 argtypes=[
@@ -207,7 +218,8 @@ class WaypointManagerMod(NMSMod):
 
     @manual_hook(
             "cGcBinoculars::SetMarker",
-            0xFFE8A0,
+            #0xFFE8A0,
+            pattern="40 55 41 56 48 8D AC 24 C8",
             func_def=FUNC_CALL_SIGS["cGcBinoculars::SetMarker"],
             detour_time="after",
     )
@@ -218,36 +230,80 @@ class WaypointManagerMod(NMSMod):
             self.state.bincoulars_ptr = this
             #self.state.binoculars = map_struct(this, nms_structs.cGcBinoculars)
 
+
     @one_shot
     @manual_hook(
         "cGcSimulation::UpdateRender",
-        offset=0x103D300,
+        #offset=0x103D300,
+        pattern="48 8B C4 48 89 58 08 48 89 68 10 48 89 70 18 57 48 81 EC E0 00 00 00 48 8B F1",
         func_def=FUNC_CALL_SIGS["cGcSimulation::UpdateRender"],
         detour_time="after",
     )
     def get_player_environement(self, this):
-        logging.info("TEST")
+        logging.info(f'--------cGcSimulation::UpdateRender captured at {this}')
         if self.state.playerEnv_ptr != (this + 81638 + 2048):
             logging.info(f'Setting self.state.playerEnv')
             self.state.playerEnv_ptr = this + 81638 + 2048
             self.state.playerEnv = map_struct(self.state.playerEnv_ptr, nms_structs.cGcPlayerEnvironment)
             test = map_struct(self.state.playerEnv_ptr, common.cTkMatrix34)
             logging.info(f'test value: {self.state.playerEnv.mbIsNight}')
+    @disable
+    @one_shot               
+    @manual_hook(
+            "cGcApplication::Data::Data",
+            #0xD63F50,
+            pattern="48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 20 33 F6 48 C7 41 40",
+            func_def=FUNC_CALL_SIGS["cGcApplication::Data::Data"],
+            detour_time="after",
+    )
+    def capture_GcApplication(self, this):
+        logging.info(f'--------cGcApplication::Data::Data captured at : {this}')
+        #nms.GcApplication.data = map_struct(this, nms_structs.cGcApplication.data)
+        if self.state.playerEnv_ptr == (this + 3849792 + 653104 + 81638 + 2048):
+            logging.info(f'self.state.playerEnv_ptr matches Application offset {this + 3849792 + 653104 + 81638 + 2048}')
+        #logging.info(f'Setting self.state.playerEnv')
+        #self.state.playerEnv = (self.state.playerEnv_ptr, common.cTkMatrix34)
+        #logging.info(f'{self.state.playerEnv[3]}') # type: ignore
+
+    @one_shot
+    @manual_hook(
+        "cGcApplication::GetSimulation",
+        pattern="48 8B 41 38 48 05 20",
+        func_def=FUNC_CALL_SIGS["cGcApplication::GetSimulation"],
+        detour_time="after",
+    )
+    def get_application(self, this):
+        logging.info(f'--------cGcApplication::GetSimulation captured at {this}')
+        if self.state.playerEnv_ptr != (this + 81638 + 2048):
+            logging.info(f'Setting self.state.application')
+            self.state.application = map_struct(this + 0x50, nms_structs.cGcApplication)
+
+    @one_shot
+    @manual_hook(
+        "cGcPlayer::cGcPlayer",
+        pattern="48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 50 0F 29 74 24 40 48 8B F9 E8",
+        func_def=FUNC_CALL_SIGS["cGcPlayer::cGcPlayer"],
+        detour_time="after",
+    )
+    def get_Player(self, this):
+        logging.info(f'--------cGcPlayer::cGcPlayer captured at {this}')
 
 
     #cTkInputDeviceManager::ProcessMouse(cTkInputDeviceManager *this, struct cTkInputPort *)
     @one_shot
     @manual_hook(
-        "cTkInputDeviceManager::ProcessMouse",
-        offset=0x232BD80,
-        func_def=FUNC_CALL_SIGS["cTkInputDeviceManager::ProcessMouse"],
+        "cTkInputPort::SetButton",
+        #offset=0x232BD80,
+        pattern="40 57 48 83 EC 40 48 83 79 58",
+        func_def=FUNC_CALL_SIGS["cTkInputPort::SetButton"],
         detour_time="after",
     )
-    def get_inputPort(self, this, inputPort):
-        logging.info("cTkInputDeviceManager::ProcessMouse")
-        if self.state.inputPort_ptr != inputPort:
+    def get_inputPort(self, this, leIndex):
+        logging.info("--------cTkInputPort::SetButton")
+        logging.info(f'leIndex: {leIndex}')
+        if self.state.inputPort_ptr != this:
             logging.info("Setting self.state.inputPort")
-            self.state.inputPort_ptr = inputPort
+            self.state.inputPort_ptr = this
             self.state.inputPort = map_struct(self.state.inputPort_ptr, nms_structs.cTkInputPort)
 
 
@@ -261,8 +317,11 @@ class WaypointManagerMod(NMSMod):
     @on_key_pressed("j")
     def press_f(self):
         logging.info("J key pressed")
-
-        set_main_window_focus()
+        logging.info(f'{self.state.playerEnv.mPlayerTM.pos.__json__()}')
+        logging.info(f'{self.state.playerEnv.mPlayerTM.__str__()}')
+        position = call_function("cGcPlayer::GetPosition", 
+                                 pattern="0F 10 81 50 02 00 00 48")
+        #set_main_window_focus()
         #logging.info(f'{pymem.Pymem(EXE_NAME).process_handle}')
         #if keyboard.is_pressed('f'):
         #    logging.info("release f")
@@ -270,6 +329,7 @@ class WaypointManagerMod(NMSMod):
         #else:
         #    logging.info("press f")
         #    keyboard.press('f')
+
 
 #-----------------------------------------------------------------GUI Elements-------------------------------------------------------------------------#
     
@@ -284,7 +344,7 @@ class WaypointManagerMod(NMSMod):
         self.print_values()
 
     @gui_button("Test Key Press")
-    def test_press(self):
+    def test_press_button(self):
         self.test_press = True
         if not self.nms_window.isActiveWindow():
             self.nms_window.activateWindow()
@@ -392,8 +452,8 @@ class WaypointManagerMod(NMSMod):
             destination_pos = self.state.wpDict[location]
             destination_vector = self.repackVector3f(destination_pos)
             logging.info(f'destination_vector: ' + destination_vector.__str__())
-            node_matrix = self.getNodeMatrix()
-            node_vector = node_matrix.pos
+            node_matrix = self.GetNodeTransMats(self.state.binoculars.MarkerModel)
+            node_vector = node_matrix.pos # type: ignore
             logging.info(f'node_vector: ' + node_vector.__str__())
             transformation_vector = destination_vector - node_vector
             logging.info(transformation_vector.__str__())
@@ -405,14 +465,37 @@ class WaypointManagerMod(NMSMod):
     def moveWaypointToDestination(self, transformation_vector):
         try:
             logging.info(f'Move waypoint to destination')
-            call_function("Engine::ShiftAllTransformsForNode", self.state.binoculars.MarkerModel.lookupInt, ctypes.addressof(transformation_vector))
+            call_function(
+                "Engine::ShiftAllTransformsForNode",
+                self.state.binoculars.MarkerModel.lookupInt,
+                ctypes.addressof(transformation_vector),
+                pattern="40 53 48 83 EC 20 44 8B D1 44 8B C1")
             logging.info(f'\n')
         except Exception as e:
                 logging.exception(e)
     
-    def getNodeMatrix(self):
+    """ def getNodeMatrix(self):
         node_matrix = engine.GetNodeAbsoluteTransMatrix(self.state.binoculars.MarkerModel)
-        return node_matrix
+        return node_matrix """
+    
+    def GetNodeTransMats(
+        node: TkHandle,
+        rel_mat: Optional[cTkMatrix34] = None,
+        abs_mat: Optional[cTkMatrix34] = None,
+    ) -> tuple[cTkMatrix34, cTkMatrix34]:
+        if rel_mat is None:
+            rel_mat = cTkMatrix34()
+        if abs_mat is None:
+            abs_mat = cTkMatrix34()
+        call_function(
+            "Engine::GetNodeTransMats",
+            node.lookupInt,
+            ctypes.addressof(rel_mat), # type: ignore
+            ctypes.addressof(abs_mat), # type: ignore
+            overload="TkHandle, cTkMatrix34 *, cTkMatrix34 *",
+            pattern="40 56 48 83 EC 20 44 8B D1 44 8B C9 41 C1 EA 12 41 81 E1 FF FF 03 00 49 8B F0 4C"
+        )
+        return (rel_mat, abs_mat)
     
     def repackVector3f(self, dict_a):
       vector = common.Vector3f()
