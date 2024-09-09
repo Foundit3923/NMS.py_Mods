@@ -34,6 +34,7 @@ class TakeOffCost(NMSMod):
     def takeoff_cost(self, value):
         self.state.takeoff_cost = value
 
+    @disable
     @manual_hook(
         "cGcSpaceshipComponent::GetTakeOffCost",
         offset = 0x1367E40,
@@ -45,6 +46,7 @@ class TakeOffCost(NMSMod):
         return self.state.takeoff_cost
 
     @one_shot
+    @disable
     @manual_hook(
         "cGcSimulation::UpdateRender",
         offset=0x103D300,

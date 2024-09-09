@@ -28,7 +28,7 @@ import nmspy.data.engine as engine
 from pymhf.gui.gui import GUI
 from pymhf.core._types import FUNCDEF
 from nmspy.data.functions.call_sigs import FUNC_CALL_SIGS
-from pymhf.core.utils import set_main_window_focus, debug_set_main_window_focus, get_main_window, eval_foreground
+from pymhf.core.utils import set_main_window_focus, get_main_window, is_main_window_foreground
 from nmspy.data.common import TkHandle, Vector3f, cTkMatrix34
 #from nmspy.data import engine as engine, common, structs as nms_structs, local_types as lt
 
@@ -88,7 +88,7 @@ class Window:
 
 @dataclass
 class State_Vars(ModState):
-    application: nms_structs.cGcApplication = None
+    """ application: nms_structs.cGcApplication = None
     binoculars: nms_structs.cGcBinoculars = None
     playerEnv: nms_structs.cGcPlayerEnvironment = None
     inputPort: nms_structs.cTkInputPort = None
@@ -98,8 +98,8 @@ class State_Vars(ModState):
     playerEnv_ptr: int = 0
     player_ptr: int = 0
     binoculars_ptr: int = 0
-    inputPort_ptr: int = 0
-    start_pressing: bool = False
+    inputPort_ptr: int = 0 """
+    handle: int = 0
     saved_wp_flag: bool = False
     wpDict: dict = field(default_factory = dict)
     _save_fields_ = ("wpDict", )
@@ -112,7 +112,6 @@ class WindowFocus(NMSMod):
     __NMSPY_required_version__ = "0.7.0"
 
     state = State_Vars()
-    player_ptr = state.player_ptr
 
 #--------------------------------------------------------------------Init----------------------------------------------------------------------------#
 
@@ -131,7 +130,21 @@ class WindowFocus(NMSMod):
         self.gui_window = Window("pyMHF")
         self.player_pos: common.cTkMatrix34 = None
         self.debug = False
+        self.start_pressing = False
 
+    @on_state_change("APPVIEW")
+    def init_state_var(self):
+        """ try:
+            self.loadJson()
+        except Exception as e:
+            logging.exception(e)
+        #Isn't set until after save file is fully loaded
+        self.state.playerEnv = nms.GcApplication.data.contents.Simulation.environment.playerEnvironment        
+        sim_addr = ctypes.addressof(nms.GcApplication.data.contents.Simulation)
+        self.state.binoculars = map_struct(sim_addr + 74160 + 6624, nms_structs.cGcBinoculars)
+        logging.info(f'state var set')
+        logging.info(f'\n') """
+        logging.info("state change hook working")
 #--------------------------------------------------Hooks and Functions to Capture and Place Waypoints--------------------------------------------------#
 
     @manual_hook(
@@ -145,54 +158,32 @@ class WindowFocus(NMSMod):
         detour_time="after",
     ) #@main_loop.after
     def do_something(self):
-        if self.state.start_pressing:
-            eval_foreground()
-            if not keyboard.is_pressed('f'):
-                keyboard.press('f')
-            logging.info(f'Eval in Main self.state.saved_wp_flag == {self.state.saved_wp_flag}')
-            if self.counter < 100:
-                if keyboard.is_pressed('f'):
-                    if keyboard.is_pressed('e'):
-                        logging.info("pressing f and e")
-                    else:
-                        logging.info("pressing f")
-                        keyboard.press('e')
-                else:
-                    logging.info(f'{self.counter}, {keyboard.is_pressed("f")}')
-                    #self.state.inputPort.SetButton(lt.eInputButton.EInputButton_KeyF)
-                    keyboard.press('f')
-                    self.counter += 1
-            else:
-                logging.info("self.counter > 100")
-                keyboard.release('e')
-                keyboard.release('f')
-                self.state.start_pressing = False
-                self.counter = 0
-            eval_foreground()
-
-        if self.test_press: 
-            logging.info(f'Counter = {self.counter}')
-            if self.counter > 10:
-                self.test_press = False
-            logging.info("finishing test_press")
-            #self.toggleFKey()
-            #self.toggleFKey()
-            #self.toggleFKey()
-            keyboard.press_and_release('f')
-            self.counter += 1
-            eval_foreground()
-        if self.debug:
-            #logging.info("Main_?self.debug -> eval_foreground()")
-            eval_foreground()
-            pressed = keyboard.is_pressed('f')
-            #logging.info(f'Main_?self.debug_? not keyboard.is_pressed('f') = {pressed}')
-            if not keyboard.is_pressed('f'):
-                #test = True
+        if self.start_pressing:
+            pressed = keyboard.is_pressed('g')
+            if not keyboard.is_pressed('g'):
                 keyboard.press('g')
-                """ try:
+            if is_main_window_foreground():
+                keyboard.release('g')
+                if not keyboard.is_pressed('f'):
                     keyboard.press('f')
-                except Exception as e:
-                    logging.error(e) """
+                logging.info(f'Eval in Main self.state.saved_wp_flag == {self.state.saved_wp_flag}')
+                if self.counter < 100:
+                    if keyboard.is_pressed('f'):
+                        if keyboard.is_pressed('e'):
+                            logging.info("pressing f and e")
+                        else:
+                            logging.info("pressing f")
+                            keyboard.press('e')
+                    else:
+                        logging.info(f'{self.counter}, {keyboard.is_pressed("f")}')
+                        keyboard.press('f')
+                        self.counter += 1
+                else:
+                    logging.info("self.counter > 100")
+                    keyboard.release('e')
+                    keyboard.release('f')
+                    self.start_pressing = False
+                    self.counter = 0
 
 
     @on_key_pressed("o")
@@ -208,7 +199,6 @@ class WindowFocus(NMSMod):
     @on_key_pressed("y")
     def toggle_window_focus(self):
         logging.info(f'Y key pressed\n')
-        debug_set_main_window_focus('esc', 1, True)
         main_window = get_main_window()
         ctypes.windll.user32.UpdateWindow(main_window.getHandle())
         logging.info('Updated window')
@@ -224,21 +214,23 @@ class WindowFocus(NMSMod):
         logging.info("U key pressed")
         #self.toggleFKey()
         #self.state.inputPort.SetButton(lt.eInputButton.EInputButton_KeyF)
+        main_window = get_main_window()
+        self.state.handle = main_window.getHandle()
         logging.info("U key pressed -> eval_foreground()")
-        try:
+        """ try:
             eval_foreground()
-        except Exception as e:
-            logging.error(e)
+        except Exception as e: 
+            logging.error(e)"""
         logging.info("U key pressed -> set_main_window_focus()")
         try:
             set_main_window_focus()
         except Exception as e:
             logging.error(e)
         logging.info("U key pressed -> eval_foreground()")
-        try:
+        """ try:
             eval_foreground()
         except Exception as e:
-            logging.error(e)
+            logging.error(e) """
         logging.info(f'self.debug: {self.debug} -> True')
         logging.info("U key pressed -> Main")
         self.debug = True
