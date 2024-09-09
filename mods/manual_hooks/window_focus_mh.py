@@ -181,9 +181,19 @@ class WindowFocus(NMSMod):
             keyboard.press_and_release('f')
             self.counter += 1
             eval_foreground()
+        if self.debug:
+            #logging.info("Main_?self.debug -> eval_foreground()")
+            eval_foreground()
+            pressed = keyboard.is_pressed('f')
+            #logging.info(f'Main_?self.debug_? not keyboard.is_pressed('f') = {pressed}')
+            if not keyboard.is_pressed('f'):
+                #test = True
+                keyboard.press('g')
+                """ try:
+                    keyboard.press('f')
+                except Exception as e:
+                    logging.error(e) """
 
-            
-            #self.callSetButton()
 
     @on_key_pressed("o")
     def set_marker(self):
@@ -214,7 +224,25 @@ class WindowFocus(NMSMod):
         logging.info("U key pressed")
         #self.toggleFKey()
         #self.state.inputPort.SetButton(lt.eInputButton.EInputButton_KeyF)
-        target_pos = (919, 514)
+        logging.info("U key pressed -> eval_foreground()")
+        try:
+            eval_foreground()
+        except Exception as e:
+            logging.error(e)
+        logging.info("U key pressed -> set_main_window_focus()")
+        try:
+            set_main_window_focus()
+        except Exception as e:
+            logging.error(e)
+        logging.info("U key pressed -> eval_foreground()")
+        try:
+            eval_foreground()
+        except Exception as e:
+            logging.error(e)
+        logging.info(f'self.debug: {self.debug} -> True')
+        logging.info("U key pressed -> Main")
+        self.debug = True
+        """ target_pos = (919, 514)
         main_window = get_main_window()
         logging.info(f'main window: {main_window}')
         gui_window = pwc.getWindowsWithTitle("pyMHF")[0]
@@ -223,7 +251,7 @@ class WindowFocus(NMSMod):
         logging.info(f'main window hwnd: {hwnd}')
         win32gui.BringWindowToTop(hwnd)
         win32gui.SetForegroundWindow(hwnd)
-        win32gui.SetFocus(hwnd)
+        win32gui.SetFocus(hwnd) """
         """ position = mouse.get_position()
         logging.info(f'mouse positin: {position}')
         move_delta = (target_pos[0]-position[0], target_pos[1]-position[1])
