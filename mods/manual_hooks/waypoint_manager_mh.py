@@ -272,9 +272,6 @@ class WaypointManagerMod(NMSMod):
         #nms.GcApplication.data = map_struct(this, nms_structs.cGcApplication.data)
         if self.state.playerEnv_ptr == (this + 3849792 + 653104 + 81638 + 2048):
             logging.info(f'self.state.playerEnv_ptr matches Application offset {this + 3849792 + 653104 + 81638 + 2048}')
-        #logging.info(f'Setting self.state.playerEnv')
-        #self.state.playerEnv = (self.state.playerEnv_ptr, common.cTkMatrix34)
-        #logging.info(f'{self.state.playerEnv[3]}') # type: ignore
 
     @one_shot
     @manual_hook(
@@ -288,16 +285,6 @@ class WaypointManagerMod(NMSMod):
         if self.state.playerEnv_ptr != (this + 81638 + 2048):
             logging.info(f'Setting self.state.application')
             self.state.application = map_struct(this + 0x50, nms_structs.cGcApplication)
-
-    """ @one_shot
-    @manual_hook(
-        "cGcPlayer::cGcPlayer",
-        pattern="48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 50 0F 29 74 24 40 48 8B F9 E8",
-        func_def=FUNC_CALL_SIGS["cGcPlayer::cGcPlayer"],
-        detour_time="after",
-    )
-    def get_Player(self, this):
-        logging.info(f'--------cGcPlayer::cGcPlayer captured at {this}') """
 
     @one_shot
     @manual_hook(
@@ -336,20 +323,9 @@ class WaypointManagerMod(NMSMod):
             self.state.inputPort_ptr = this
             self.state.inputPort = map_struct(self.state.inputPort_ptr, nms_structs.cTkInputPort)
 
-
-    """ @one_shot
-    @manual_hook(
-        "cGcScanner::Update",
-        #offset=0x232BD80,
-        pattern="48 8B C4 55 53 57 41 56 41 57 48 8D A8 88 F7",
-        func_def=FUNC_CALL_SIGS["cGcScanner::Update"],
-        detour_time="after",
-    )
-    def capture_scanner(self, this, val):
-        logging.info("--------Scanner::Update hook working")
-        logging.info("Setting self.state.scanner") 
-        self.state.scanner_ptr = this
-        self.state.scanner = map_struct(this, nms_structs.cGcScanner) """      
+    @hooks.Engine.ShiftAllTransformsForNode.before
+    def before_shift(self, *args):
+        logging.info(f"Shift: {args}")   
 
     @one_shot
     @manual_hook(
@@ -365,71 +341,6 @@ class WaypointManagerMod(NMSMod):
         self.state.player_ptr = this
         player_ptr = this
 
-    """ #@disable
-    @manual_hook(
-        "cGcHumanController::GetButtonInput",
-        offset= (player_ptr + 55) + 8,
-        #offset=0x232BD80,
-        #pattern="48 8B C4 48 89 58 20 F3 0F 11 48 10 55 56 57 41 54 41 55 41 56 41 57 48 8D A8 B8",
-        func_def=FUNC_CALL_SIGS["cGcPlayer::UpdateScanning"],
-        detour_time="after",
-    )
-    def capture_get_button_input(self, this):
-        logging.info("--------GetButtonInput hook working")
-        logging.info("Setting self.state.player_ptr")
-        
-
-    @disable
-    @manual_hook(
-        "windowProc",
-        pattern="48 89 5C 24 20 48 89 4C 24 08 55 56 57 41 55 41 57 48 8D",
-        func_def=FUNC_CALL_SIGS["windowProc"],
-        detour_time="after",
-    )
-    def focus_window_check(self, this):
-        logging.info("--------Window Procedure")
-
-    @manual_hook(
-        "glfwPlatformFocusWindow",
-        pattern="40 53 48 83 EC 20 48 8B D9 48 8B 89 58 03 00 00",
-        func_def=FUNC_CALL_SIGS["glfwPlatformFocusWindow"],
-        detour_time="after",
-    )
-    def catpure_window(self, this):
-        logging.info("--------glfwPlatformFocusWindow")
-
-    @manual_hook(
-        "glfwInputWindowFocus",
-        pattern="48 89 5C 24 20 57 48 83 EC 30 48 8B 81",
-        func_def=FUNC_CALL_SIGS["glfwInputWindowFocus"],
-        detour_time="after",
-    )
-    def catpure_window_2(self, this):
-        logging.info("--------glfwInputWindowFocus")
-
-    @manual_hook(
-        "cGcPlayerHUD::IsAnyMarkerTagInteractionActive",
-        pattern="48 89 5C 24 08 57 48 83 EC 30 48 8D 99",
-        func_def=FUNC_CALL_SIGS["cGcPlayerHUD::IsAnyMarkerTagInteractionActive"],
-        detour_time="after",
-    )
-    def marker_func_check(self, this):
-        logging.info(f'cGcPlayerHUD::IsAnyMarkerTagInteractionActive hook activated')
-        logging.info(f'GetButtonInput check passed') """
-
-    @on_key_pressed("o")
-    def set_marker(self):
-        logging.info("O key pressed")
-        ptr = ctypes.c_ulonglong(self.state.binoculars_ptr)
-        try:
-            call_function(
-                "cGcBinoculars::SetMarker",
-                ptr,
-                pattern="40 55 41 56 48 8D AC 24 C8",
-                )
-        except Exception as e:
-            logging.error(e)
-
     @on_key_pressed("y")
     def toggle_window_focus(self):
         logging.info(f'Y key pressed\n')
@@ -439,9 +350,6 @@ class WaypointManagerMod(NMSMod):
         logging.info('Updated window')
         logging.info("start test press")
         self.state.start_pressing = True
-        #virtualKey =  MapVirtualKeyA(lt.einputButton.EInputButton_Escape,0)
-        #win32gui.PostMessage(main_window.getHandle(), WM_KEYDOWN,lt.einputButton.EInputButton_Escape, 0x0005|virtualKey<<16)     
-        #win32gui.PostMessage(main_window.getHandle(), WM_CHAR, 'f')
 
 
     @on_key_pressed('u')
@@ -459,33 +367,6 @@ class WaypointManagerMod(NMSMod):
         win32gui.BringWindowToTop(hwnd)
         win32gui.SetForegroundWindow(hwnd)
         win32gui.SetFocus(hwnd)
-        """ position = mouse.get_position()
-        logging.info(f'mouse positin: {position}')
-        move_delta = (target_pos[0]-position[0], target_pos[1]-position[1])
-        logging.info(f'move delta: {move_delta}')
-        #mouse.move_to(move_delta[0], move_delta[1])
-        active = win32gui.GetForegroundWindow() == main_window._hWnd
-        logging.info(f'is active: {active}')
-        set_main_window_focus()
-        hwnd = call_function(
-            "glfwPlatformFocusWindow",
-            self.state.glfwWindow,
-            pattern="40 53 48 83 EC 20 48 8B D9 48 8B 89 58 03 00 00")
-        logging.info(f'HWND: {hwnd}')
-        active = win32gui.GetForegroundWindow() == main_window._hWnd
-        logging.info(f'is active: {active}')
-        
-        mouse.move(move_delta[0], move_delta[1], absolute=False, duration=0.2)
-
-        mouse.click('left')
-        time.sleep(1)
-        mouse.click('left')
-        main_window = get_main_window()
-        ctypes.windll.user32.UpdateWindow(main_window.getHandle())
-        logging.info('Updated window')
-        virtualKey =  MapVirtualKeyA(lt.einputButton.EInputButton_Escape,0)
-        win32gui.PostMessage(main_window.getHandle(), WM_KEYDOWN,lt.einputButton.EInputButton_Escape, 0x0005|virtualKey<<16)    
-        self.callSetButton() """ 
 
 
     @on_key_pressed("n")
@@ -595,22 +476,6 @@ class WaypointManagerMod(NMSMod):
     
 #--------------------------------------------------------------------Methods----------------------------------------------------------------------------#
 
-#------------------------------------------------------Window Management-------------------------------------------------------------#
-
-    """ def toggle_gui_and_game(self):
-        logging.info(f'Checking active window')
-        if self.nms_window.isActiveWindow():
-            logging.info(f'{self.nms_window.name} is the active window')
-            self.gui_window.activateWindow()
-        else:
-            logging.info(f'{self.gui_window.name} is the active window')
-            self.nms_window.activateWindow() """
-    
-    def set_nms_focus(self):
-        set_main_window_focus()
-        self.initial_input = True
-
-
 #--------------------------------------------------Storing and Loading JSON----------------------------------------------------------#
 
     def loadJson(self):
@@ -654,7 +519,8 @@ class WaypointManagerMod(NMSMod):
             destination_pos = self.state.wpDict[location]
             destination_vector = self.repackVector3f(destination_pos)
             logging.info(f'destination_vector: ' + destination_vector.__str__())
-            node_matrix = engine.GetNodeTransMats(self.state.binoculars.MarkerModel)
+            node_matrix = engine.GetNodeAbsoluteTransMatrix(self.state.binoculars.MarkerModel)
+            logging.info(f'node_matrix: ' + node_matrix.__str__())
             node_vector = node_matrix.pos # type: ignore
             logging.info(f'node_vector: ' + node_vector.__str__())
             transformation_vector = destination_vector - node_vector
@@ -667,37 +533,14 @@ class WaypointManagerMod(NMSMod):
     def moveWaypointToDestination(self, transformation_vector):
         try:
             logging.info(f'Move waypoint to destination')
-            call_function(
-                "Engine::ShiftAllTransformsForNode",
-                self.state.binoculars.MarkerModel.lookupInt,
-                ctypes.addressof(transformation_vector),
-                pattern="40 53 48 83 EC 20 44 8B D1 44 8B C1")
-            logging.info(f'\n')
+            try:
+                handle = self.state.binoculars.MarkerModel
+                engine.ShiftAllTransformsForNode(handle, transformation_vector)
+            except:
+                import traceback
+                logging.exception(traceback.format_exc())
         except Exception as e:
                 logging.exception(e)
-    
-    """ def getNodeMatrix(self):
-        node_matrix = engine.GetNodeAbsoluteTransMatrix(self.state.binoculars.MarkerModel)
-        return node_matrix """
-    
-    """ def GetNodeTransMats(
-        node: common.TkHandle,
-        rel_mat: Optional[cTkMatrix34] = None,
-        abs_mat: Optional[cTkMatrix34] = None,
-    ) -> tuple[cTkMatrix34, cTkMatrix34]:
-        if rel_mat is None:
-            rel_mat = cTkMatrix34()
-        if abs_mat is None:
-            abs_mat = cTkMatrix34()
-        call_function(
-            "Engine::GetNodeTransMats",
-            node.lookupInt,
-            ctypes.addressof(rel_mat), # type: ignore
-            ctypes.addressof(abs_mat), # type: ignore
-            overload="TkHandle, cTkMatrix34 *, cTkMatrix34 *",
-            pattern="40 56 48 83 EC 20 44 8B D1 44 8B C9 41 C1 EA 12 41 81 E1 FF FF 03 00 49 8B F0 4C"
-        )
-        return (rel_mat, abs_mat) """
     
     def repackVector3f(self, dict_a):
       vector = common.Vector3f()
