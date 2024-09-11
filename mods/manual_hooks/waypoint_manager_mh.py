@@ -28,63 +28,9 @@ import nmspy.data.engine as engine
 from pymhf.gui.gui import GUI
 from pymhf.core._types import FUNCDEF
 from nmspy.data.functions.call_sigs import FUNC_CALL_SIGS
-from pymhf.core.utils import set_main_window_focus, debug_set_main_window_focus, get_main_window, eval_foreground
+from pymhf.core.utils import set_main_window_focus, get_main_window, is_main_window_foreground
 from nmspy.data.common import TkHandle, Vector3f, cTkMatrix34
 #from nmspy.data import engine as engine, common, structs as nms_structs, local_types as lt
-
-class Window:
-    def __init__(self, name):
-      self.name = name
-      self.is_stored = False
-      self.window = None
-  
-    def isWindowLaunched(self):
-        logging.info(f'Checking if {self.name} is launched')
-        if self.name in gw.getAllTitles():
-            logging.info(f'{self.name} is launched\n')
-            return True
-        else:
-            logging.info(f'{self.name} is not launched\n')
-            return False
-        
-    def isWindowStored(self):
-        logging.info(f'Checking if {self.name} window is stored')
-        if self.window == None:
-            logging.info(f'{self.name} window not stored\n')
-            return False
-        else:
-            logging.info(f'{self.name} window is already stored\n\n')
-            return True
-        
-    def storeWindow(self):
-        if not self.isWindowStored():
-            logging.info(f'Storing {self.name} window\n')
-            self.window = gw.getWindowsWithTitle(self.name)[0]
-            self.is_stored = True
-
-    def isActiveWindow(self, log=True):
-        if log: logging.info(f'Checking if {self.name} is active window')
-        window = gw.getActiveWindow().title
-        result = window == self.name
-        if log: logging.info(f'{result}: {window} is the active window\n')
-        return result
-
-    def activateWindow(self):
-        logging.info(f'Activating {self.name} window')
-        if self.isWindowLaunched():
-            if self.isWindowStored(): 
-                if not self.isActiveWindow():
-                    logging.info(f'Changing window focus to {self.name}')
-                    self.window.activate()
-                    logging.info(f'{self.name} is active window\n\n')
-                else:
-                    logging.info(f'{self.name} window is already activated\n\n')
-            else:
-                self.storeWindow()
-                self.activateWindow()
-        else:
-            logging.info(f'Unable to activate {self.name} window')
-            logging.info(f'{self.name} window is not launched. Launch window and try again.\n\n')
 
 @dataclass
 class State_Vars(ModState):
@@ -93,12 +39,13 @@ class State_Vars(ModState):
     playerEnv: nms_structs.cGcPlayerEnvironment = None
     inputPort: nms_structs.cTkInputPort = None
     player: nms_structs.cGcPlayer = None
-    glfwWindow: nms_structs.GLFWwindow = None
+    #scanner: nms_structs.cGcScanner = None
 
     playerEnv_ptr: int = 0
     player_ptr: int = 0
     binoculars_ptr: int = 0
     inputPort_ptr: int = 0
+    #scanner_ptr: int = 0
     start_pressing: bool = False
     saved_wp_flag: bool = False
     wpDict: dict = field(default_factory = dict)
@@ -127,35 +74,35 @@ class WaypointManagerMod(NMSMod):
         self.fallingMarker = False
         #self.gui_storage = gui
         self.test_press: bool = False
-        self.nms_window = Window("No Man's Sky")
-        self.gui_window = Window("pyMHF")
         self.player_pos: common.cTkMatrix34 = None
+        self.initial_input = False
+        self.initial_input_count = 0
+        self.end_initial_input = False
+        self.ready_for_input = False
+        self.f_press_confirmed = False
+        self.e_press_confirmed = False
 
     @on_state_change("APPVIEW")
     def init_state_var(self):
         logging.info("Setting State Vars")
-        """ try:
+        try:
             self.loadJson()
         except Exception as e:
             logging.exception(e)
         logging.info(f'wpDict: {self.state.wpDict}')
-        sim_addr = ctypes.addressof(nms.GcApplication.data.contents.Simulation)
+        """sim_addr = ctypes.addressof(nms.GcApplication.data.contents.Simulation)
         self.state.binoculars = map_struct(sim_addr + 74160 + 6624, nms_structs.cGcBinoculars) """
         try:
             self.state.playerEnv = nms.GcApplication.data.contents.Simulation.environment.playerEnvironment 
         except Exception as e:
             logging.info("Unable to store playerEnv")
             logging.exception(e)
-        self.nms_window = Window("No Man's Sky")
-        self.nms_window.storeWindow()
-        self.gui_window = Window("pyMHF")
-        self.gui_window.storeWindow()
         logging.info(f'state var set ({self.name})')
         logging.info(f'\n')
 
 #--------------------------------------------------Hooks and Functions to Capture and Place Waypoints--------------------------------------------------#
 
-    @manual_hook(
+    """ @manual_hook(
         "cGcApplication::Update",
         #0x26C710,
         pattern="40 53 48 83 EC 20 E8 ?? ?? ?? ?? 48 89",
@@ -164,9 +111,47 @@ class WaypointManagerMod(NMSMod):
             argtypes=[]
         ),
         detour_time="after",
-    ) #@main_loop.after
+    ) """
+    @main_loop.before
     def do_something(self):
         #logging.info("test")
+        #Processes that require main window focus
+        if self.state.start_pressing:
+            pressed = keyboard.is_pressed('g')
+            if not keyboard.is_pressed('g') and self.initial_input:
+                keyboard.press('g')
+                self.initial_input = False
+            if self.ready_for_input:
+                if not keyboard.is_pressed('f'):
+                    keyboard.press('f') 
+                logging.info(f'{self.counter}, {self.f_press_confirmed}')
+                if self.counter < 100:
+                    if self.f_press_confirmed:
+                        if self.e_press_confirmed:
+                            logging.info("pressing f and e")
+                        else:
+                            logging.info("pressing f")
+                            if self.counter > 20:
+                                keyboard.press('e')
+                    else:
+                        keyboard.press('f') 
+                    self.counter += 1
+                else:
+                    logging.info("self.counter > 100")
+                    keyboard.release('e')
+                    keyboard.release('f')
+                    self.e_press_confirmed = False
+                    self.f_press_confirmed = False
+                    self.state.start_pressing = False
+                    self.ready_for_input = False
+                    self.counter = 0
+                    
+            if is_main_window_foreground():
+                keyboard.release('g')
+                self.ready_for_input = True
+                #if not keyboard.is_pressed('f'):
+                #    keyboard.press('f')
+        #Processes that do not require main window focus
         if self.fallingMarker:
             logging.info(f'counter: {self.counter}')
             if self.counter < 100:
@@ -178,41 +163,40 @@ class WaypointManagerMod(NMSMod):
                 logging.info("Setting self.state.saved_wp_flag == False")
                 self.state.saved_wp_flag = False
                 self.fallingMarker = False
-        if self.state.start_pressing:
-            logging.info(f'Eval in Main self.state.saved_wp_flag == {self.state.saved_wp_flag}')
-            if self.counter < 100:
-                if keyboard.is_pressed('f'):
-                    if keyboard.is_pressed('e'):
-                        logging.info("pressing f and e")
-                    else:
-                        logging.info("pressing f")
-                        keyboard.press('e')
-                else:
-                    logging.info(f'{self.counter}, {keyboard.is_pressed("f")}')
-                    #self.state.inputPort.SetButton(lt.eInputButton.EInputButton_KeyF)
-                    keyboard.press('f')
-                    self.counter += 1
-            else:
-                keyboard.release('e')
-                keyboard.release('f')
-                self.state.start_pressing = False
-                self.counter = 0
-            eval_foreground()
-
-        if self.test_press: 
-            logging.info(f'Counter = {self.counter}')
-            if self.counter > 10:
-                self.test_press = False
-            logging.info("finishing test_press")
-            #self.toggleFKey()
-            #self.toggleFKey()
-            #self.toggleFKey()
-            keyboard.press_and_release('f')
-            self.counter += 1
-            eval_foreground()
-
             
-            #self.callSetButton()
+    @disable
+    @one_shot
+    @manual_hook(
+            "cGcBinoculars::Update",
+            #0xD63F50,
+            pattern="40 55 53 56 41 55 41 56 48 8D AC 24 60",
+            func_def=FUNC_CALL_SIGS["cGcBinoculars::Update"],
+            detour_time="after",
+    ) #@hooks.cGcAtmosphereEntryComponent.ActiveAtmosphereEntry.after #offset 00D63350
+    def binocUpdate(self, this, *args):
+        logging.info(f'--------Binoc Update')
+        logging.info(f's.s.binoculars_ptr = {self.state.binoculars_ptr}, this = {this}, s.s.binoculars = {self.state.binoculars}')
+        check = 0
+        check += self.state.binoculars_ptr != this
+        check += self.state.binoculars == None
+        logging.info(f'check = {check}')
+        if check:
+            logging.info(f'Setting self.state.binoculars')
+            self.state.binoculars_ptr = this
+            self.state.binoculars = map_struct(this, nms_structs.cGcBinoculars)
+            logging.info(f's.s.binoculars_ptr = {self.state.binoculars_ptr}, this = {this}, s.s.binoculars = {self.state.binoculars}')
+
+    @disable
+    @manual_hook(
+            "cGcBinoculars::UpdateDiscoveryUI",
+            #0xD63F50,
+            pattern="48 8B C4 48 89 48 08 55 41 54 41 55",
+            func_def=FUNC_CALL_SIGS["cGcBinoculars::UpdateDiscoveryUI"],
+            detour_time="after",
+    ) #@hooks.cGcAtmosphereEntryComponent.ActiveAtmosphereEntry.after #offset 00D63350
+    def binocDiscoveryUI(self, this, *args):
+        logging.info(f'--------Binoc Discovery UI load')
+
 
     @manual_hook(
             "cGcAtmosphereEntryComponent::ActiveAtmosphereEntry",
@@ -332,7 +316,7 @@ class WaypointManagerMod(NMSMod):
 
 
     #cTkInputDeviceManager::ProcessMouse(cTkInputDeviceManager *this, struct cTkInputPort *)
-    @disable
+    #@disable
     @manual_hook(
         "cTkInputPort::SetButton",
         #offset=0x232BD80,
@@ -341,12 +325,31 @@ class WaypointManagerMod(NMSMod):
         detour_time="after",
     )
     def get_inputPort(self, this, leIndex):
-        logging.info("--------cTkInputPort::SetButton")
-        logging.info(f'leIndex: {leIndex}')
+        #logging.info("--------cTkInputPort::SetButton")
+        #logging.info(f'leIndex: {leIndex}')
+        if leIndex == 101:
+            self.e_press_confirmed = True
+        if leIndex == 102:
+            self.f_press_confirmed = True
         if self.state.inputPort_ptr != this:
             logging.info("Setting self.state.inputPort")
             self.state.inputPort_ptr = this
             self.state.inputPort = map_struct(self.state.inputPort_ptr, nms_structs.cTkInputPort)
+
+
+    """ @one_shot
+    @manual_hook(
+        "cGcScanner::Update",
+        #offset=0x232BD80,
+        pattern="48 8B C4 55 53 57 41 56 41 57 48 8D A8 88 F7",
+        func_def=FUNC_CALL_SIGS["cGcScanner::Update"],
+        detour_time="after",
+    )
+    def capture_scanner(self, this, val):
+        logging.info("--------Scanner::Update hook working")
+        logging.info("Setting self.state.scanner") 
+        self.state.scanner_ptr = this
+        self.state.scanner = map_struct(this, nms_structs.cGcScanner) """      
 
     @one_shot
     @manual_hook(
@@ -362,7 +365,7 @@ class WaypointManagerMod(NMSMod):
         self.state.player_ptr = this
         player_ptr = this
 
-    #@disable
+    """ #@disable
     @manual_hook(
         "cGcHumanController::GetButtonInput",
         offset= (player_ptr + 55) + 8,
@@ -412,22 +415,25 @@ class WaypointManagerMod(NMSMod):
     )
     def marker_func_check(self, this):
         logging.info(f'cGcPlayerHUD::IsAnyMarkerTagInteractionActive hook activated')
-        logging.info(f'GetButtonInput check passed')
+        logging.info(f'GetButtonInput check passed') """
 
     @on_key_pressed("o")
     def set_marker(self):
         logging.info("O key pressed")
         ptr = ctypes.c_ulonglong(self.state.binoculars_ptr)
-        call_function(
-            "Binoculars::SetMarker",
-            ctypes.addressof(self.state.binoculars),
-            pattern="40 55 41 56 48 8D AC 24 C8",
-            )
+        try:
+            call_function(
+                "cGcBinoculars::SetMarker",
+                ptr,
+                pattern="40 55 41 56 48 8D AC 24 C8",
+                )
+        except Exception as e:
+            logging.error(e)
 
     @on_key_pressed("y")
     def toggle_window_focus(self):
         logging.info(f'Y key pressed\n')
-        debug_set_main_window_focus('esc', 1, True)
+        set_main_window_focus()
         main_window = get_main_window()
         ctypes.windll.user32.UpdateWindow(main_window.getHandle())
         logging.info('Updated window')
@@ -481,15 +487,44 @@ class WaypointManagerMod(NMSMod):
         win32gui.PostMessage(main_window.getHandle(), WM_KEYDOWN,lt.einputButton.EInputButton_Escape, 0x0005|virtualKey<<16)    
         self.callSetButton() """ 
 
-        
+
+    @on_key_pressed("n")
+    def on_n(self):
+        self.state.start_pressing = False
+        self.initial_input = False
+        keyboard.release('g')
+        keyboard.release('f')
+
+    @on_key_pressed("h")
+    def getvisorstate(self):
+        self.state.playerEnv = map_struct(self.state.playerEnv_ptr, nms_structs.cGcPlayerEnvironment)
+        try:
+            mode = self.state.binoculars.emode
+        except Exception as e:
+            logging.error(e)
+        logging.info(f'Binoc Mode: {mode}')
+        none = None
+        status = False
+        try:
+            status = call_function(
+                "cGcGenericSectionConditionVisorActive::IsConditionTrue",
+                none,
+                pattern="48 8B 05 ?? ?? ?? ?? 48 8B 88 50 D9 65 00 48 85 C9 74 0B 83",
+                )
+        except Exception as e:
+            logging.error(e)
+        logging.info(f'Visor Status: {status}')
 
 
     @on_key_pressed("j")
     def press_f(self):
         logging.info("J key pressed")
-        logging.info(f'player.position: {self.state.player.position}')
+        """ logging.info(f'player.position: {self.state.player.position}')
         #direct_position = map_struct((self.state.player_ptr + 592), common.cTkMatrix34)
-        logging.info(f'direct position: {self.player_pos.pos.__json__()}')
+        logging.info(f'direct position: {self.player_pos.pos.__json__()}') """   
+        logging.info(f'inFocus: {set_main_window_focus()}')
+        self.state.start_pressing = True
+        self.initial_input = True
 
 
 
@@ -510,8 +545,6 @@ class WaypointManagerMod(NMSMod):
         self.test_press = True
         if not self.nms_window.isActiveWindow():
             self.nms_window.activateWindow()
-        
-
 
     @gui_button("Print saved waypoints")
     def print_waypoints(self):
@@ -525,10 +558,11 @@ class WaypointManagerMod(NMSMod):
     @option_replace.setter
     def option_replace(self, location_name):
         self.text = location_name
-        if not self.nms_window.isActiveWindow(): 
-            self.nms_window.activateWindow()
-        if self.state.playerEnv == None:
+        set_main_window_focus()
+        if self.state.playerEnv == None and self.state.playerEnv_ptr != None:
             self.state.playerEnv = map_struct(self.state.playerEnv_ptr, nms_structs.cGcPlayerEnvironment)
+        else:
+            logging.error("PlayerEnv_ptr is not set.")
         self.storeLocation(location_name)
 
     @property
@@ -551,11 +585,9 @@ class WaypointManagerMod(NMSMod):
     @load_waypoint_by_name.setter
     def load_waypoint_by_name(self, waypoint_name):
         self.text = waypoint_name
-        """ if not self.nms_window.isActiveWindow(): 
-            self.nms_window.activateWindow() """
-        #logging.info("set_main_window_focus() Commented out")
         logging.info("set_main_window_focus()")
         set_main_window_focus()
+        self.initial_input = True
         self.state.saved_wp_flag = True
         logging.info(f'Setting self.state.saved_wp_flag -> {self.state.saved_wp_flag}')
         logging.info(f'start processing: {self.state.start_pressing} -> True')
@@ -565,14 +597,19 @@ class WaypointManagerMod(NMSMod):
 
 #------------------------------------------------------Window Management-------------------------------------------------------------#
 
-    def toggle_gui_and_game(self):
+    """ def toggle_gui_and_game(self):
         logging.info(f'Checking active window')
         if self.nms_window.isActiveWindow():
             logging.info(f'{self.nms_window.name} is the active window')
             self.gui_window.activateWindow()
         else:
             logging.info(f'{self.gui_window.name} is the active window')
-            self.nms_window.activateWindow()
+            self.nms_window.activateWindow() """
+    
+    def set_nms_focus(self):
+        set_main_window_focus()
+        self.initial_input = True
+
 
 #--------------------------------------------------Storing and Loading JSON----------------------------------------------------------#
 
@@ -617,7 +654,7 @@ class WaypointManagerMod(NMSMod):
             destination_pos = self.state.wpDict[location]
             destination_vector = self.repackVector3f(destination_pos)
             logging.info(f'destination_vector: ' + destination_vector.__str__())
-            node_matrix = self.GetNodeTransMats(self.state.binoculars.MarkerModel)
+            node_matrix = engine.GetNodeTransMats(self.state.binoculars.MarkerModel)
             node_vector = node_matrix.pos # type: ignore
             logging.info(f'node_vector: ' + node_vector.__str__())
             transformation_vector = destination_vector - node_vector
@@ -643,8 +680,8 @@ class WaypointManagerMod(NMSMod):
         node_matrix = engine.GetNodeAbsoluteTransMatrix(self.state.binoculars.MarkerModel)
         return node_matrix """
     
-    def GetNodeTransMats(
-        node: TkHandle,
+    """ def GetNodeTransMats(
+        node: common.TkHandle,
         rel_mat: Optional[cTkMatrix34] = None,
         abs_mat: Optional[cTkMatrix34] = None,
     ) -> tuple[cTkMatrix34, cTkMatrix34]:
@@ -660,7 +697,7 @@ class WaypointManagerMod(NMSMod):
             overload="TkHandle, cTkMatrix34 *, cTkMatrix34 *",
             pattern="40 56 48 83 EC 20 44 8B D1 44 8B C9 41 C1 EA 12 41 81 E1 FF FF 03 00 49 8B F0 4C"
         )
-        return (rel_mat, abs_mat)
+        return (rel_mat, abs_mat) """
     
     def repackVector3f(self, dict_a):
       vector = common.Vector3f()
@@ -669,16 +706,6 @@ class WaypointManagerMod(NMSMod):
       vector.z = dict_a['z']
       return vector
 
-    def toggleFKey(self):
-        if keyboard.is_pressed('f'):
-            logging.info("Release F")
-            keyboard.release('f')
-        else:
-            logging.info("Press F")
-            keyboard.press('f')
-
-    def callSetButton(self):
-        self.state.inputPort.SetButton(lt.eInputButton.EInputButton_Escape)
 #------------------------------------------------------Displaying Waypoint Data--------------------------------------------------------------#
 
     def print_available_waypoints(self):
