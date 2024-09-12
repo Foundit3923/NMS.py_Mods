@@ -10,6 +10,7 @@ from typing import Optional
 from dataclasses import dataclass, field
 import mouse
 import time
+from copy import deepcopy
 
 import nmspy.data.functions.hooks as hooks
 from pymhf.core.hooking import disable, on_key_pressed, on_key_release, manual_hook, one_shot
@@ -32,10 +33,18 @@ from pymhf.core.utils import set_main_window_focus, get_main_window, is_main_win
 from nmspy.data.common import TkHandle, Vector3f, cTkMatrix34
 #from nmspy.data import engine as engine, common, structs as nms_structs, local_types as lt
 
+class cGcBinoculars(ctypes.Structure):
+    MarkerModel: common.TkHandle
+
+cGcBinoculars._fields_ = [
+    ("_padding0", ctypes.c_ubyte * 472),
+    ("MarkerModel", common.TkHandle),
+]
+
 @dataclass
 class State_Vars(ModState):
     application: nms_structs.cGcApplication = None
-    binoculars: nms_structs.cGcBinoculars = None
+    binoculars: cGcBinoculars = None
     playerEnv: nms_structs.cGcPlayerEnvironment = None
     inputPort: nms_structs.cTkInputPort = None
     player: nms_structs.cGcPlayer = None
@@ -68,7 +77,10 @@ class WaypointManagerMod(NMSMod):
         self.name = "WaypointManagerMod"
         self.should_print = False
         self.counter = 0
-        self.marker_lookup = None
+        self.capture = False
+        self.lookupInt: common.TkHandle = None
+        self.node_matrix: common.cTkMatrix34 = None
+        self.node_pos: common.Vector3f = None
         self.text = ""
         #self.last_saved_flag = False
         self.fallingMarker = False
@@ -81,6 +93,7 @@ class WaypointManagerMod(NMSMod):
         self.ready_for_input = False
         self.f_press_confirmed = False
         self.e_press_confirmed = False
+        self.marker_state = False
 
     @on_state_change("APPVIEW")
     def init_state_var(self):
@@ -92,26 +105,11 @@ class WaypointManagerMod(NMSMod):
         logging.info(f'wpDict: {self.state.wpDict}')
         """sim_addr = ctypes.addressof(nms.GcApplication.data.contents.Simulation)
         self.state.binoculars = map_struct(sim_addr + 74160 + 6624, nms_structs.cGcBinoculars) """
-        try:
-            self.state.playerEnv = nms.GcApplication.data.contents.Simulation.environment.playerEnvironment 
-        except Exception as e:
-            logging.info("Unable to store playerEnv")
-            logging.exception(e)
         logging.info(f'state var set ({self.name})')
         logging.info(f'\n')
 
 #--------------------------------------------------Hooks and Functions to Capture and Place Waypoints--------------------------------------------------#
 
-    """ @manual_hook(
-        "cGcApplication::Update",
-        #0x26C710,
-        pattern="40 53 48 83 EC 20 E8 ?? ?? ?? ?? 48 89",
-        func_def=FUNCDEF(
-            restype=ctypes.c_ulonglong,
-            argtypes=[]
-        ),
-        detour_time="after",
-    ) """
     @main_loop.before
     def do_something(self):
         #logging.info("test")
@@ -183,19 +181,8 @@ class WaypointManagerMod(NMSMod):
         if check:
             logging.info(f'Setting self.state.binoculars')
             self.state.binoculars_ptr = this
-            self.state.binoculars = map_struct(this, nms_structs.cGcBinoculars)
+            self.state.binoculars = map_struct(this, cGcBinoculars)
             logging.info(f's.s.binoculars_ptr = {self.state.binoculars_ptr}, this = {this}, s.s.binoculars = {self.state.binoculars}')
-
-    @disable
-    @manual_hook(
-            "cGcBinoculars::UpdateDiscoveryUI",
-            #0xD63F50,
-            pattern="48 8B C4 48 89 48 08 55 41 54 41 55",
-            func_def=FUNC_CALL_SIGS["cGcBinoculars::UpdateDiscoveryUI"],
-            detour_time="after",
-    ) #@hooks.cGcAtmosphereEntryComponent.ActiveAtmosphereEntry.after #offset 00D63350
-    def binocDiscoveryUI(self, this, *args):
-        logging.info(f'--------Binoc Discovery UI load')
 
 
     @manual_hook(
@@ -219,27 +206,74 @@ class WaypointManagerMod(NMSMod):
               logging.info(f'self.fallingMarker == {self.fallingMarker}')
         except Exception as e:
             logging.exception(e)
+        self.capture = False
         return this
+    
+    @manual_hook(
+            "cTkHmdOpenVR::GetInstance",
+            pattern="E8 ?? ?? ?? ?? 38 58 15",
+            func_def=FUNCDEF(
+                restype=ctypes.c_int64,
+                argtypes=[
+                    ctypes.c_int64,
+                ]
+            ),
+            detour_time="after",
+    )
+    def checkcTkHmdOpenVRGetInstance(self, this):
+        logging.info(f'cTkHmdOpenVR::GetInstance hook is working')
+
+    @manual_hook(
+            "cGcBinoculars::SetMarker_lambda",
+            pattern="48 8B C4 48 89 58 18 89 50 10 55 56 57 48",
+            func_def=FUNCDEF(
+                restype=ctypes.c_int64,
+                argtypes=[
+                    ctypes.c_int64,
+                    ctypes.c_uint32,
+                    ctypes.c_int64,
+                ]
+            ),
+            detour_time="after",
+    )
+    def checkSetMarkerLambda(self, this, miLookupInt, matrix34):
+        logging.info(f'SetMarker_Lambda hook is working')
+        logging.info(f'Setting lookupInt: {miLookupInt}')
+        self.lookupInt = TkHandle()
+        self.lookupInt.lookupInt = miLookupInt
+        logging.info(f'lookupInt: {self.lookupInt}')
+        self.node_matrix = map_struct(matrix34, common.cTkMatrix34)
+        logging.info(f'Node Matrix: {self.node_matrix.__str__()}')
+        self.node_pos = deepcopy(self.node_matrix.pos)
+        logging.info(f'Node Position: {self.node_pos.__str__()}')
+
+        
 
     @manual_hook(
             "cGcBinoculars::SetMarker",
             #0xFFE8A0,
             pattern="40 55 41 56 48 8D AC 24 C8",
             func_def=FUNC_CALL_SIGS["cGcBinoculars::SetMarker"],
-            detour_time="after",
+            detour_time="before",
     )
     def checkSetMarker(self, this):
         logging.info(f'--------Set Marker event detected')
         logging.info(f's.s.binoculars_ptr = {self.state.binoculars_ptr}, this = {this}, s.s.binoculars = {self.state.binoculars}')
+        self.capture = True
+        self.marker_state = True
         check = 0
         check += self.state.binoculars_ptr != this
         check += self.state.binoculars == None
+        B = map_struct(this, cGcBinoculars)
         logging.info(f'check = {check}')
         if check:
             logging.info(f'Setting self.state.binoculars')
             self.state.binoculars_ptr = this
-            self.state.binoculars = map_struct(this, nms_structs.cGcBinoculars)
+            self.state.binoculars = map_struct(this, cGcBinoculars)
             logging.info(f's.s.binoculars_ptr = {self.state.binoculars_ptr}, this = {this}, s.s.binoculars = {self.state.binoculars}')
+        logging.info(f'B.MarkerModel.lookupIntt: {B.MarkerModel.lookupInt}')
+        logging.info(f'self.state.binoculars.MarkerModel.lookupInt: {self.state.binoculars.MarkerModel.lookupInt}')
+
 
 
     @one_shot
@@ -258,20 +292,6 @@ class WaypointManagerMod(NMSMod):
             self.state.playerEnv = map_struct(self.state.playerEnv_ptr, nms_structs.cGcPlayerEnvironment)
             test = map_struct(self.state.playerEnv_ptr, common.cTkMatrix34)
             logging.info(f'test value: {self.state.playerEnv.mbIsNight}')
-    @disable
-    @one_shot               
-    @manual_hook(
-            "cGcApplication::Data::Data",
-            #0xD63F50,
-            pattern="48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 20 33 F6 48 C7 41 40",
-            func_def=FUNC_CALL_SIGS["cGcApplication::Data::Data"],
-            detour_time="after",
-    )
-    def capture_GcApplication(self, this):
-        logging.info(f'--------cGcApplication::Data::Data captured at : {this}')
-        #nms.GcApplication.data = map_struct(this, nms_structs.cGcApplication.data)
-        if self.state.playerEnv_ptr == (this + 3849792 + 653104 + 81638 + 2048):
-            logging.info(f'self.state.playerEnv_ptr matches Application offset {this + 3849792 + 653104 + 81638 + 2048}')
 
     @one_shot
     @manual_hook(
@@ -300,6 +320,13 @@ class WaypointManagerMod(NMSMod):
             self.state.player = map_struct(this, nms_structs.cGcPlayer)
             logging.info(f'Storing self.state.player')
             self.player_pos = map_struct((this + 592), common.cTkMatrix34)
+            logging.info(f'Storing self.player_pos: {self.player_pos.__str__()}')
+            self.state.binoculars = map_struct((this + 6512), cGcBinoculars)
+            logging.info(f'Storing self.state.binoculars')
+            logging.info(f'binoculars: {self.state.binoculars}')
+            logging.info(f'binoculars.MarkerModel.lookupInt: {self.state.binoculars.MarkerModel.lookupInt}')
+
+
 
 
     #cTkInputDeviceManager::ProcessMouse(cTkInputDeviceManager *this, struct cTkInputPort *)
@@ -319,13 +346,27 @@ class WaypointManagerMod(NMSMod):
         if leIndex == 102:
             self.f_press_confirmed = True
         if self.state.inputPort_ptr != this:
-            logging.info("Setting self.state.inputPort")
+            #logging.info("Setting self.state.inputPort")
             self.state.inputPort_ptr = this
-            self.state.inputPort = map_struct(self.state.inputPort_ptr, nms_structs.cTkInputPort)
-
+            self.state.inputPort = map_struct(self.state.inputPort_ptr, nms_structs.cTkInputPort)   
+    
     @hooks.Engine.ShiftAllTransformsForNode.before
     def before_shift(self, *args):
         logging.info(f"Shift: {args}")   
+
+    #@disable
+    @hooks.Engine.GetNodeAbsoluteTransMatrix.before
+    def getNodeMatrix(self, miLookupInt, matrix):
+        if self.capture and miLookupInt == self.state.binoculars.MarkerModel.lookupInt:
+            logging.info("GetNodeAbsoluteTransMatrix hook working")
+            logging.info(f"lookupInt: {miLookupInt}, Shift: {matrix}") 
+            
+    
+    @hooks.Engine.SetNodeActivation.before
+    def captureNodeActivation(self, *args):
+        if self.capture:
+            logging.info(f'Node active {args}')
+
 
     @one_shot
     @manual_hook(
@@ -341,71 +382,39 @@ class WaypointManagerMod(NMSMod):
         self.state.player_ptr = this
         player_ptr = this
 
-    @on_key_pressed("y")
-    def toggle_window_focus(self):
-        logging.info(f'Y key pressed\n')
-        set_main_window_focus()
-        main_window = get_main_window()
-        ctypes.windll.user32.UpdateWindow(main_window.getHandle())
-        logging.info('Updated window')
-        logging.info("start test press")
-        self.state.start_pressing = True
-
-
-    @on_key_pressed('u')
-    def toogle_f(self):
-        logging.info("U key pressed")
-        #self.toggleFKey()
-        #self.state.inputPort.SetButton(lt.eInputButton.EInputButton_KeyF)
-        target_pos = (919, 514)
-        main_window = get_main_window()
-        logging.info(f'main window: {main_window}')
-        gui_window = pwc.getWindowsWithTitle("pyMHF")[0]
-        logging.info(f'gui window: {gui_window}')
-        hwnd = main_window.getHandle()
-        logging.info(f'main window hwnd: {hwnd}')
-        win32gui.BringWindowToTop(hwnd)
-        win32gui.SetForegroundWindow(hwnd)
-        win32gui.SetFocus(hwnd)
-
-
-    @on_key_pressed("n")
-    def on_n(self):
-        self.state.start_pressing = False
-        self.initial_input = False
-        keyboard.release('g')
-        keyboard.release('f')
-
-    @on_key_pressed("h")
-    def getvisorstate(self):
-        self.state.playerEnv = map_struct(self.state.playerEnv_ptr, nms_structs.cGcPlayerEnvironment)
-        try:
-            mode = self.state.binoculars.emode
-        except Exception as e:
-            logging.error(e)
-        logging.info(f'Binoc Mode: {mode}')
-        none = None
-        status = False
-        try:
-            status = call_function(
-                "cGcGenericSectionConditionVisorActive::IsConditionTrue",
-                none,
-                pattern="48 8B 05 ?? ?? ?? ?? 48 8B 88 50 D9 65 00 48 85 C9 74 0B 83",
-                )
-        except Exception as e:
-            logging.error(e)
-        logging.info(f'Visor Status: {status}')
-
-
     @on_key_pressed("j")
-    def press_f(self):
-        logging.info("J key pressed")
-        """ logging.info(f'player.position: {self.state.player.position}')
-        #direct_position = map_struct((self.state.player_ptr + 592), common.cTkMatrix34)
-        logging.info(f'direct position: {self.player_pos.pos.__json__()}') """   
-        logging.info(f'inFocus: {set_main_window_focus()}')
-        self.state.start_pressing = True
-        self.initial_input = True
+    def setcapture(self):
+        player_pos = map_struct((self.state.player_ptr + 592), common.cTkMatrix34)
+        logging.info(f'Player pos: {player_pos}')
+        logging.info(f'LookupInt: {self.state.binoculars.MarkerModel.lookupInt}')
+
+        """ node_matrix = common.cTkMatrix34()
+        handle = self.state.binoculars.MarkerModel
+        lookupInt = handle.lookupInt
+        check = (lookupInt & 0xFFFC0000) != 0 and (lookupInt & 0x3FFFF) != 0x3FFFF
+        logging.info(f'lookupInt check: {check}')
+        node_matrix = engine.GetNodeAbsoluteTransMatrix(handle)
+        logging.info(f'MarkerModel: {handle}')
+        logging.info(f'node_matrix: ' + node_matrix.__str__()) """
+
+    @on_key_pressed("u")
+    def getmarkermatrix(self):
+        logging.info("U key pressed")
+        self.capture = False
+        markermodel = map_struct(ctypes.addressof(self.state.binoculars) + 0x760, common.TkHandle)
+        logging.info(f'markerModel: {markermodel.lookupInt}')
+        bMarkerModel = self.state.binoculars.MarkerModel
+        logging.info(f'bmarkerModel: {bMarkerModel.lookupInt}')
+        logging.info(f'Node AbsTransMat(markermodel): {engine.GetNodeAbsoluteTransMatrix(markermodel)}')
+        logging.info(f'Node AbsTransMat(bMarkerModel): {engine.GetNodeAbsoluteTransMatrix(bMarkerModel)}')
+        markermodel.lookupInt = self.lookupInt
+        logging.info(f'self.lookupInt: {markermodel.lookupInt}')
+        logging.info(f'Node AbsTransMat(self.lookupInt): {engine.GetNodeAbsoluteTransMatrix(markermodel)}')
+
+        #self.marker_state = not self.marker_state
+        #engine.SetNodeActivation(self.state.binoculars.MarkerModel.lookupInt, self.marker_state)
+        #engine.SetNodeActivation(self.lookupInt, self.marker_state)
+
 
 
 
@@ -440,10 +449,6 @@ class WaypointManagerMod(NMSMod):
     def option_replace(self, location_name):
         self.text = location_name
         set_main_window_focus()
-        if self.state.playerEnv == None and self.state.playerEnv_ptr != None:
-            self.state.playerEnv = map_struct(self.state.playerEnv_ptr, nms_structs.cGcPlayerEnvironment)
-        else:
-            logging.error("PlayerEnv_ptr is not set.")
         self.storeLocation(location_name)
 
     @property
@@ -499,7 +504,8 @@ class WaypointManagerMod(NMSMod):
     def storeLocation(self, name):
         try:
           logging.info(f'Save waypoint location to dictionary, then update JSON')
-          self.state.wpDict[name] = self.player_pos.pos.__json__()
+          player_pos = map_struct((self.state.player_ptr + 592), common.cTkMatrix34)
+          self.state.wpDict[name] = player_pos.right.__json__()
           self.updateJson()
           logging.info(f'\n')
           return dict
@@ -514,27 +520,27 @@ class WaypointManagerMod(NMSMod):
     def moveWaypoint(self, location):
         try:
             logging.info(f'Moving marker')
+            MarkerModel = map_struct(ctypes.addressof(self.state.binoculars) + 0x760, common.TkHandle)
             destination_vector = common.Vector3f()
             node_vector = common.Vector3f()
             destination_pos = self.state.wpDict[location]
             destination_vector = self.repackVector3f(destination_pos)
             logging.info(f'destination_vector: ' + destination_vector.__str__())
-            node_matrix = engine.GetNodeAbsoluteTransMatrix(self.state.binoculars.MarkerModel)
+            node_matrix = engine.GetNodeAbsoluteTransMatrix(MarkerModel)
             logging.info(f'node_matrix: ' + node_matrix.__str__())
             node_vector = node_matrix.pos # type: ignore
-            logging.info(f'node_vector: ' + node_vector.__str__())
+            logging.info(f'node_vector: {node_vector.__json__()}')
             transformation_vector = destination_vector - node_vector
-            logging.info(transformation_vector.__str__())
-            self.moveWaypointToDestination(transformation_vector)
+            logging.info(f'transformation_vector: ' + transformation_vector.__str__())
+            self.moveWaypointToDestination(transformation_vector, MarkerModel)
             logging.info(f'\n')
         except Exception as e:
                 logging.exception(e)
 
-    def moveWaypointToDestination(self, transformation_vector):
+    def moveWaypointToDestination(self, transformation_vector, handle):
         try:
             logging.info(f'Move waypoint to destination')
             try:
-                handle = self.state.binoculars.MarkerModel
                 engine.ShiftAllTransformsForNode(handle, transformation_vector)
             except:
                 import traceback
