@@ -33,28 +33,16 @@ from pymhf.core.utils import set_main_window_focus, get_main_window, is_main_win
 from nmspy.data.common import TkHandle, Vector3f, cTkMatrix34
 #from nmspy.data import engine as engine, common, structs as nms_structs, local_types as lt
 
-class cGcBinoculars(ctypes.Structure):
-    MarkerModel: common.TkHandle
-
-cGcBinoculars._fields_ = [
-    ("_padding0", ctypes.c_ubyte * 472),
-    ("MarkerModel", common.TkHandle),
-]
 
 @dataclass
 class State_Vars(ModState):
-    application: nms_structs.cGcApplication = None
-    binoculars: cGcBinoculars = None
-    playerEnv: nms_structs.cGcPlayerEnvironment = None
+    binoculars: nms_structs.cGcBinoculars = None
     inputPort: nms_structs.cTkInputPort = None
     player: nms_structs.cGcPlayer = None
-    #scanner: nms_structs.cGcScanner = None
 
-    playerEnv_ptr: int = 0
     player_ptr: int = 0
     binoculars_ptr: int = 0
     inputPort_ptr: int = 0
-    #scanner_ptr: int = 0
     start_pressing: bool = False
     saved_wp_flag: bool = False
     wpDict: dict = field(default_factory = dict)
@@ -64,7 +52,7 @@ class State_Vars(ModState):
 class WaypointManagerMod(NMSMod):
     __author__ = "foundit"
     __description__ = "Place markers at stored waypoints of places you've been"
-    __version__ = "0.4"
+    __version__ = "1.0"
     __NMSPY_required_version__ = "0.7.0"
 
     state = State_Vars()
@@ -103,8 +91,6 @@ class WaypointManagerMod(NMSMod):
         except Exception as e:
             logging.exception(e)
         logging.info(f'wpDict: {self.state.wpDict}')
-        """sim_addr = ctypes.addressof(nms.GcApplication.data.contents.Simulation)
-        self.state.binoculars = map_struct(sim_addr + 74160 + 6624, nms_structs.cGcBinoculars) """
         logging.info(f'state var set ({self.name})')
         logging.info(f'\n')
 
@@ -115,27 +101,22 @@ class WaypointManagerMod(NMSMod):
         #logging.info("test")
         #Processes that require main window focus
         if self.state.start_pressing:
-            pressed = keyboard.is_pressed('g')
             if not keyboard.is_pressed('g') and self.initial_input:
                 keyboard.press('g')
                 self.initial_input = False
             if self.ready_for_input:
                 if not keyboard.is_pressed('f'):
                     keyboard.press('f') 
-                logging.info(f'{self.counter}, {self.f_press_confirmed}')
+                logging.info(f'count: {self.counter}, f pressed: {self.f_press_confirmed}, e pressed: {self.e_press_confirmed}')
                 if self.counter < 100:
                     if self.f_press_confirmed:
-                        if self.e_press_confirmed:
-                            logging.info("pressing f and e")
-                        else:
-                            logging.info("pressing f")
+                        if not self.e_press_confirmed:
                             if self.counter > 20:
                                 keyboard.press('e')
                     else:
                         keyboard.press('f') 
                     self.counter += 1
                 else:
-                    logging.info("self.counter > 100")
                     keyboard.release('e')
                     keyboard.release('f')
                     self.e_press_confirmed = False
@@ -147,22 +128,15 @@ class WaypointManagerMod(NMSMod):
             if is_main_window_foreground():
                 keyboard.release('g')
                 self.ready_for_input = True
-                #if not keyboard.is_pressed('f'):
-                #    keyboard.press('f')
         #Processes that do not require main window focus
         if self.fallingMarker:
-            logging.info(f'counter: {self.counter}')
             if self.counter < 100:
                 self.counter += 1
             else:
                 self.counter = 0
-                logging.info(f'self.moveWaypoint("{self.text}")')
                 self.moveWaypoint(self.text)
-                logging.info("Setting self.state.saved_wp_flag == False")
-                self.state.saved_wp_flag = False
                 self.fallingMarker = False
             
-    @disable
     @one_shot
     @manual_hook(
             "cGcBinoculars::Update",
@@ -173,15 +147,13 @@ class WaypointManagerMod(NMSMod):
     ) #@hooks.cGcAtmosphereEntryComponent.ActiveAtmosphereEntry.after #offset 00D63350
     def binocUpdate(self, this, *args):
         logging.info(f'--------Binoc Update')
-        logging.info(f's.s.binoculars_ptr = {self.state.binoculars_ptr}, this = {this}, s.s.binoculars = {self.state.binoculars}')
         check = 0
         check += self.state.binoculars_ptr != this
         check += self.state.binoculars == None
-        logging.info(f'check = {check}')
         if check:
             logging.info(f'Setting self.state.binoculars')
             self.state.binoculars_ptr = this
-            self.state.binoculars = map_struct(this, cGcBinoculars)
+            self.state.binoculars = map_struct(this, nms_structs.cGcBinoculars)
             logging.info(f's.s.binoculars_ptr = {self.state.binoculars_ptr}, this = {this}, s.s.binoculars = {self.state.binoculars}')
 
 
@@ -202,53 +174,13 @@ class WaypointManagerMod(NMSMod):
         try:
             logging.info(f'self.state.saved_wp_flag == {self.state.saved_wp_flag}')
             if self.state.saved_wp_flag:
+              self.state.saved_wp_flag = False
               self.fallingMarker = True
               logging.info(f'self.fallingMarker == {self.fallingMarker}')
         except Exception as e:
             logging.exception(e)
-        self.capture = False
         return this
-    
-    @manual_hook(
-            "cTkHmdOpenVR::GetInstance",
-            pattern="E8 ?? ?? ?? ?? 38 58 15",
-            func_def=FUNCDEF(
-                restype=ctypes.c_int64,
-                argtypes=[
-                    ctypes.c_int64,
-                ]
-            ),
-            detour_time="after",
-    )
-    def checkcTkHmdOpenVRGetInstance(self, this):
-        logging.info(f'cTkHmdOpenVR::GetInstance hook is working')
-
-    @manual_hook(
-            "cGcBinoculars::SetMarker_lambda",
-            pattern="48 8B C4 48 89 58 18 89 50 10 55 56 57 48",
-            func_def=FUNCDEF(
-                restype=ctypes.c_int64,
-                argtypes=[
-                    ctypes.c_int64,
-                    ctypes.c_uint32,
-                    ctypes.c_int64,
-                ]
-            ),
-            detour_time="after",
-    )
-    def checkSetMarkerLambda(self, this, miLookupInt, matrix34):
-        logging.info(f'SetMarker_Lambda hook is working')
-        logging.info(f'Setting lookupInt: {miLookupInt}')
-        self.lookupInt = TkHandle()
-        self.lookupInt.lookupInt = miLookupInt
-        logging.info(f'lookupInt: {self.lookupInt}')
-        self.node_matrix = map_struct(matrix34, common.cTkMatrix34)
-        logging.info(f'Node Matrix: {self.node_matrix.__str__()}')
-        self.node_pos = deepcopy(self.node_matrix.pos)
-        logging.info(f'Node Position: {self.node_pos.__str__()}')
-
-        
-
+     
     @manual_hook(
             "cGcBinoculars::SetMarker",
             #0xFFE8A0,
@@ -258,76 +190,6 @@ class WaypointManagerMod(NMSMod):
     )
     def checkSetMarker(self, this):
         logging.info(f'--------Set Marker event detected')
-        logging.info(f's.s.binoculars_ptr = {self.state.binoculars_ptr}, this = {this}, s.s.binoculars = {self.state.binoculars}')
-        self.capture = True
-        self.marker_state = True
-        check = 0
-        check += self.state.binoculars_ptr != this
-        check += self.state.binoculars == None
-        B = map_struct(this, cGcBinoculars)
-        logging.info(f'check = {check}')
-        if check:
-            logging.info(f'Setting self.state.binoculars')
-            self.state.binoculars_ptr = this
-            self.state.binoculars = map_struct(this, cGcBinoculars)
-            logging.info(f's.s.binoculars_ptr = {self.state.binoculars_ptr}, this = {this}, s.s.binoculars = {self.state.binoculars}')
-        logging.info(f'B.MarkerModel.lookupIntt: {B.MarkerModel.lookupInt}')
-        logging.info(f'self.state.binoculars.MarkerModel.lookupInt: {self.state.binoculars.MarkerModel.lookupInt}')
-
-
-
-    @one_shot
-    @manual_hook(
-        "cGcSimulation::UpdateRender",
-        #offset=0x103D300,
-        pattern="48 8B C4 48 89 58 08 48 89 68 10 48 89 70 18 57 48 81 EC E0 00 00 00 48 8B F1",
-        func_def=FUNC_CALL_SIGS["cGcSimulation::UpdateRender"],
-        detour_time="after",
-    )
-    def get_player_environement(self, this):
-        logging.info(f'--------cGcSimulation::UpdateRender captured at {this}')
-        if self.state.playerEnv_ptr != (this + 81638 + 2048):
-            logging.info(f'Setting self.state.playerEnv')
-            self.state.playerEnv_ptr = this + 81638 + 2048
-            self.state.playerEnv = map_struct(self.state.playerEnv_ptr, nms_structs.cGcPlayerEnvironment)
-            test = map_struct(self.state.playerEnv_ptr, common.cTkMatrix34)
-            logging.info(f'test value: {self.state.playerEnv.mbIsNight}')
-
-    @one_shot
-    @manual_hook(
-        "cGcApplication::GetSimulation",
-        pattern="48 8B 41 38 48 05 20",
-        func_def=FUNC_CALL_SIGS["cGcApplication::GetSimulation"],
-        detour_time="after",
-    )
-    def get_application(self, this):
-        logging.info(f'--------cGcApplication::GetSimulation captured at {this}')
-        if self.state.playerEnv_ptr != (this + 81638 + 2048):
-            logging.info(f'Setting self.state.application')
-            self.state.application = map_struct(this + 0x50, nms_structs.cGcApplication)
-
-    @one_shot
-    @manual_hook(
-        "cGcPlayer::GetPosition",
-        pattern="0F 10 81 50 02 00 00 48",
-        func_def=FUNC_CALL_SIGS["cGcPlayer::GetPosition"],
-        detour_time="after",
-    )
-    def player_update_control(self, this, *args):
-        logging.info(f'cGcPlayer.GetPosition hook working')
-        if self.state.player == None or self.state.player_ptr != this:
-            self.state.player_ptr = this
-            self.state.player = map_struct(this, nms_structs.cGcPlayer)
-            logging.info(f'Storing self.state.player')
-            self.player_pos = map_struct((this + 592), common.cTkMatrix34)
-            logging.info(f'Storing self.player_pos: {self.player_pos.__str__()}')
-            self.state.binoculars = map_struct((this + 6512), cGcBinoculars)
-            logging.info(f'Storing self.state.binoculars')
-            logging.info(f'binoculars: {self.state.binoculars}')
-            logging.info(f'binoculars.MarkerModel.lookupInt: {self.state.binoculars.MarkerModel.lookupInt}')
-
-
-
 
     #cTkInputDeviceManager::ProcessMouse(cTkInputDeviceManager *this, struct cTkInputPort *)
     #@disable
@@ -349,24 +211,6 @@ class WaypointManagerMod(NMSMod):
             #logging.info("Setting self.state.inputPort")
             self.state.inputPort_ptr = this
             self.state.inputPort = map_struct(self.state.inputPort_ptr, nms_structs.cTkInputPort)   
-    
-    @hooks.Engine.ShiftAllTransformsForNode.before
-    def before_shift(self, *args):
-        logging.info(f"Shift: {args}")   
-
-    #@disable
-    @hooks.Engine.GetNodeAbsoluteTransMatrix.before
-    def getNodeMatrix(self, miLookupInt, matrix):
-        if self.capture and miLookupInt == self.state.binoculars.MarkerModel.lookupInt:
-            logging.info("GetNodeAbsoluteTransMatrix hook working")
-            logging.info(f"lookupInt: {miLookupInt}, Shift: {matrix}") 
-            
-    
-    @hooks.Engine.SetNodeActivation.before
-    def captureNodeActivation(self, *args):
-        if self.capture:
-            logging.info(f'Node active {args}')
-
 
     @one_shot
     @manual_hook(
@@ -382,59 +226,7 @@ class WaypointManagerMod(NMSMod):
         self.state.player_ptr = this
         player_ptr = this
 
-    @on_key_pressed("j")
-    def setcapture(self):
-        player_pos = map_struct((self.state.player_ptr + 592), common.cTkMatrix34)
-        logging.info(f'Player pos: {player_pos}')
-        logging.info(f'LookupInt: {self.state.binoculars.MarkerModel.lookupInt}')
-
-        """ node_matrix = common.cTkMatrix34()
-        handle = self.state.binoculars.MarkerModel
-        lookupInt = handle.lookupInt
-        check = (lookupInt & 0xFFFC0000) != 0 and (lookupInt & 0x3FFFF) != 0x3FFFF
-        logging.info(f'lookupInt check: {check}')
-        node_matrix = engine.GetNodeAbsoluteTransMatrix(handle)
-        logging.info(f'MarkerModel: {handle}')
-        logging.info(f'node_matrix: ' + node_matrix.__str__()) """
-
-    @on_key_pressed("u")
-    def getmarkermatrix(self):
-        logging.info("U key pressed")
-        self.capture = False
-        markermodel = map_struct(ctypes.addressof(self.state.binoculars) + 0x760, common.TkHandle)
-        logging.info(f'markerModel: {markermodel.lookupInt}')
-        bMarkerModel = self.state.binoculars.MarkerModel
-        logging.info(f'bmarkerModel: {bMarkerModel.lookupInt}')
-        logging.info(f'Node AbsTransMat(markermodel): {engine.GetNodeAbsoluteTransMatrix(markermodel)}')
-        logging.info(f'Node AbsTransMat(bMarkerModel): {engine.GetNodeAbsoluteTransMatrix(bMarkerModel)}')
-        markermodel.lookupInt = self.lookupInt
-        logging.info(f'self.lookupInt: {markermodel.lookupInt}')
-        logging.info(f'Node AbsTransMat(self.lookupInt): {engine.GetNodeAbsoluteTransMatrix(markermodel)}')
-
-        #self.marker_state = not self.marker_state
-        #engine.SetNodeActivation(self.state.binoculars.MarkerModel.lookupInt, self.marker_state)
-        #engine.SetNodeActivation(self.lookupInt, self.marker_state)
-
-
-
-
 #-----------------------------------------------------------------GUI Elements-------------------------------------------------------------------------#
-    
-    @gui_button("INIT self values")
-    def init_values(self):
-        self.should_print = False
-        self.counter = 0
-        self.marker_lookup = None
-        self.text = ""
-        self.state.saved_wp_flag = False
-        self.fallingMarker = False
-        self.print_values()
-
-    @gui_button("Test Key Press")
-    def test_press_button(self):
-        self.test_press = True
-        if not self.nms_window.isActiveWindow():
-            self.nms_window.activateWindow()
 
     @gui_button("Print saved waypoints")
     def print_waypoints(self):
@@ -527,7 +319,7 @@ class WaypointManagerMod(NMSMod):
             destination_vector = self.repackVector3f(destination_pos)
             logging.info(f'destination_vector: ' + destination_vector.__str__())
             node_matrix = engine.GetNodeAbsoluteTransMatrix(MarkerModel)
-            logging.info(f'node_matrix: ' + node_matrix.__str__())
+            logging.info(f'node_matrix: {node_matrix.__json__()}')
             node_vector = node_matrix.pos # type: ignore
             logging.info(f'node_vector: {node_vector.__json__()}')
             transformation_vector = destination_vector - node_vector
@@ -560,6 +352,6 @@ class WaypointManagerMod(NMSMod):
     def print_available_waypoints(self):
         dict = self.state.wpDict
         count = 0
-        logging.info(f'\nAvailable waypoints:')
+        logging.info(f'Available waypoints:')
         for key in dict:
             logging.info(f'{key}: {dict[key]}')
