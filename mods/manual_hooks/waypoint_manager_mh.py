@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 import mouse
 import time
 from copy import deepcopy
+import pprint
 
 import nmspy.data.functions.hooks as hooks
 from pymhf.core.hooking import disable, on_key_pressed, on_key_release, manual_hook, one_shot
@@ -36,13 +37,18 @@ from nmspy.data.common import TkHandle, Vector3f, cTkMatrix34
 
 @dataclass
 class State_Vars(ModState):
+    application: nms_structs.cGcApplication = None
     binoculars: nms_structs.cGcBinoculars = None
-    inputPort: nms_structs.cTkInputPort = None
     player: nms_structs.cGcPlayer = None
+    SolarSystem: nms_structs.cGcSolarSystem = None
 
-    player_ptr: int = 0
+    application_ptr: int = 0
     binoculars_ptr: int = 0
-    inputPort_ptr: int = 0
+    player_ptr: int = 0
+    SolarSystem_ptr: int = 0
+
+    SolarSystemName = common.cTkFixedString[0x80]
+    UniverseAddress: int = 0
     start_pressing: bool = False
     saved_wp_flag: bool = False
     wpDict: dict = field(default_factory = dict)
@@ -63,36 +69,24 @@ class WaypointManagerMod(NMSMod):
     def __init__(self):
         super().__init__()
         self.name = "WaypointManagerMod"
-        self.should_print = False
         self.counter = 0
-        self.capture = False
-        self.lookupInt: common.TkHandle = None
-        self.node_matrix: common.cTkMatrix34 = None
-        self.node_pos: common.Vector3f = None
         self.text = ""
-        #self.last_saved_flag = False
         self.fallingMarker = False
-        #self.gui_storage = gui
-        self.test_press: bool = False
         self.player_pos: common.cTkMatrix34 = None
         self.initial_input = False
-        self.initial_input_count = 0
-        self.end_initial_input = False
         self.ready_for_input = False
         self.f_press_confirmed = False
         self.e_press_confirmed = False
-        self.marker_state = False
 
-    @on_state_change("APPVIEW")
-    def init_state_var(self):
-        logging.info("Setting State Vars")
+    @on_state_change("MODESELECTOR")
+    def init_load_files(self):
+        logging.info("Loading files")
         try:
             self.loadJson()
         except Exception as e:
             logging.exception(e)
         logging.info(f'wpDict: {self.state.wpDict}')
-        logging.info(f'state var set ({self.name})')
-        logging.info(f'\n')
+        logging.info(f'files loaded for: ({self.name})')       
 
 #--------------------------------------------------Hooks and Functions to Capture and Place Waypoints--------------------------------------------------#
 
@@ -140,11 +134,10 @@ class WaypointManagerMod(NMSMod):
     @one_shot
     @manual_hook(
             "cGcBinoculars::Update",
-            #0xD63F50,
             pattern="40 55 53 56 41 55 41 56 48 8D AC 24 60",
             func_def=FUNC_CALL_SIGS["cGcBinoculars::Update"],
             detour_time="after",
-    ) #@hooks.cGcAtmosphereEntryComponent.ActiveAtmosphereEntry.after #offset 00D63350
+    )
     def binocUpdate(self, this, *args):
         logging.info(f'--------Binoc Update')
         check = 0
@@ -156,19 +149,58 @@ class WaypointManagerMod(NMSMod):
             self.state.binoculars = map_struct(this, nms_structs.cGcBinoculars)
             logging.info(f's.s.binoculars_ptr = {self.state.binoculars_ptr}, this = {this}, s.s.binoculars = {self.state.binoculars}')
 
+    @one_shot
+    @manual_hook(
+            "cGcSolarSystem::Construct",
+            pattern="48 89 5C 24 18 48 89 4C 24 08 55 56 57 41 54 41 55 41 56 41 57 48 8D 6C 24 90 48 81 EC 70 01 00 00 83",
+            func_def=FUNC_CALL_SIGS["cGcSolarSystem::Construct"],
+            detour_time="before",
+    )
+    def captureSolarSystem(self, this):
+        logging.info("SolarSystem.Construct Hook working")
+        self.state.SolarSystem = map_struct(this, nms_structs.cGcSolarSystem)
+        self.state.SolarSystem_ptr = this
+
+    @one_shot
+    @manual_hook(
+        "cGcPlayer::UpdateScanning",
+        pattern="48 89 5C 24 20 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 F0 FA",
+        func_def=FUNC_CALL_SIGS["cGcPlayer::UpdateScanning"],
+        detour_time="after",
+    )
+    def capture_player(self, this, val):
+        logging.info("--------UpdateScanning hook working")
+        logging.info("Setting self.state.player_ptr")
+        self.state.player_ptr = this
+
+    @one_shot
+    @manual_hook(
+        "cGcApplication::Update",
+        pattern="40 53 48 83 EC 20 E8 ?? ?? ?? ?? 48 89",
+        func_def=FUNCDEF(
+            restype=ctypes.c_ulonglong,
+            argtypes=[]
+        ),
+        detour_time="after",
+    )
+    def captureApplication(self, this):
+        logging.info("Application capture hook working")
+        logging.info(f'cGcApplication *: {this}')
+        if self.state.application_ptr == 0:
+            logging.info("Capturing application")
+            self.state.application_ptr = this
 
     @manual_hook(
-            "cGcAtmosphereEntryComponent::ActiveAtmosphereEntry",
-            #0xD63F50,
-            pattern="48 89 5C 24 08 57 48 81 EC 80 00 00 00 65 48 8B 04 25 58 00 00 00 48 8B D9",
-            func_def=FUNCDEF(
-                restype=ctypes.c_int64,
-                argtypes=[
-                    ctypes.c_int64,
-                ]
-            ),
-            detour_time="after",
-    ) #@hooks.cGcAtmosphereEntryComponent.ActiveAtmosphereEntry.after #offset 00D63350
+        "cGcAtmosphereEntryComponent::ActiveAtmosphereEntry",
+        pattern="48 89 5C 24 08 57 48 81 EC 80 00 00 00 65 48 8B 04 25 58 00 00 00 48 8B D9",
+        func_def=FUNCDEF(
+            restype=ctypes.c_int64,
+            argtypes=[
+                ctypes.c_int64,
+            ]
+        ),
+        detour_time="after",
+    )
     def detectFallingMarker(self, this):
         logging.info(f'--------Falling Marker event detected')
         try:
@@ -183,7 +215,6 @@ class WaypointManagerMod(NMSMod):
      
     @manual_hook(
             "cGcBinoculars::SetMarker",
-            #0xFFE8A0,
             pattern="40 55 41 56 48 8D AC 24 C8",
             func_def=FUNC_CALL_SIGS["cGcBinoculars::SetMarker"],
             detour_time="before",
@@ -191,40 +222,26 @@ class WaypointManagerMod(NMSMod):
     def checkSetMarker(self, this):
         logging.info(f'--------Set Marker event detected')
 
-    #cTkInputDeviceManager::ProcessMouse(cTkInputDeviceManager *this, struct cTkInputPort *)
     #@disable
     @manual_hook(
         "cTkInputPort::SetButton",
-        #offset=0x232BD80,
         pattern="40 57 48 83 EC 40 48 83 79 58",
         func_def=FUNC_CALL_SIGS["cTkInputPort::SetButton"],
         detour_time="after",
     )
     def get_inputPort(self, this, leIndex):
-        #logging.info("--------cTkInputPort::SetButton")
-        #logging.info(f'leIndex: {leIndex}')
         if leIndex == 101:
             self.e_press_confirmed = True
         if leIndex == 102:
             self.f_press_confirmed = True
-        if self.state.inputPort_ptr != this:
-            #logging.info("Setting self.state.inputPort")
-            self.state.inputPort_ptr = this
-            self.state.inputPort = map_struct(self.state.inputPort_ptr, nms_structs.cTkInputPort)   
 
-    @one_shot
-    @manual_hook(
-        "cGcPlayer::UpdateScanning",
-        #offset=0x232BD80,
-        pattern="48 8B C4 48 89 58 20 F3 0F 11 48 10 55 56 57 41 54 41 55 41 56 41 57 48 8D A8 B8",
-        func_def=FUNC_CALL_SIGS["cGcPlayer::UpdateScanning"],
-        detour_time="after",
-    )
-    def capture_player(self, this, val):
-        logging.info("--------UpdateScanning hook working")
-        logging.info("Setting self.state.player_ptr")
-        self.state.player_ptr = this
-        player_ptr = this
+    @on_key_pressed('j')
+    def showSave(self):
+        logging.info("J pressed")
+        logging.info(f'{self.state.application_ptr}')
+        if self.state.application_ptr:
+            saveSlot = map_struct(0x40, ctypes.c_uint32)
+            logging.info(f'Save Slot: {saveSlot}')
 
 #-----------------------------------------------------------------GUI Elements-------------------------------------------------------------------------#
 
@@ -250,9 +267,9 @@ class WaypointManagerMod(NMSMod):
 
     @remove_waypoint.setter
     def remove_waypoint(self, location_name):
-        del self.state.wpDict[location_name]
+        self.removeWaypointByName(location_name)
         self.updateJson()
-        if not self.state.wpDict[location_name]:
+        if not self.isWaypointInDictByName(location_name):
             logging.info(f'Successfully removed Waypoint: {location_name}')
 
     @property
@@ -297,7 +314,18 @@ class WaypointManagerMod(NMSMod):
         try:
           logging.info(f'Save waypoint location to dictionary, then update JSON')
           player_pos = map_struct((self.state.player_ptr + 592), common.cTkMatrix34)
-          self.state.wpDict[name] = player_pos.right.__json__()
+          player_pos_json = player_pos.right.__json__()
+          self.updateSolarSystemName()
+          self.updateUniverseAddress()
+          str_address = str(self.state.UniverseAddress.value)
+          try:
+            logging.info(f'{self.state.wpDict}')
+            if self.state.wpDict.get(str_address):
+                self.state.wpDict[str_address][name] = player_pos_json
+            else:
+                self.addNewUniverseEntry(str_address, name, player_pos_json)
+          except Exception as e:
+              logging.error(e)          
           self.updateJson()
           logging.info(f'\n')
           return dict
@@ -306,6 +334,26 @@ class WaypointManagerMod(NMSMod):
 
     def printDict(self):
         logging.info(self.state.wpDict)
+    
+    def addNewUniverseEntry(self, str_address, name, player_pos_json):
+        solarsystemname = self.state.SolarSystemName.__str__()
+        self.state.wpDict[str_address] = {"name": solarsystemname,
+                                          name: player_pos_json,
+                                          }
+    
+    def removeWaypointByName(self, name):
+        if name is not "name":
+            for universe in self.state.wpDict:
+                if self.state.wpDict[universe].get(name):
+                    del self.state.wpDict[universe][name]
+        else:
+            logging.info("cannot delete the universe name entry")
+
+    def isWaypointInDictByName(self, name):
+        for universe in self.state.wpDict:
+            if self.state.wpDict[universe].get(name):
+                return True
+        return False
 
 #------------------------------------------------------Moving Waypoint--------------------------------------------------------------#
 
@@ -315,17 +363,20 @@ class WaypointManagerMod(NMSMod):
             MarkerModel = map_struct(ctypes.addressof(self.state.binoculars) + 0x760, common.TkHandle)
             destination_vector = common.Vector3f()
             node_vector = common.Vector3f()
-            destination_pos = self.state.wpDict[location]
-            destination_vector = self.repackVector3f(destination_pos)
-            logging.info(f'destination_vector: ' + destination_vector.__str__())
-            node_matrix = engine.GetNodeAbsoluteTransMatrix(MarkerModel)
-            logging.info(f'node_matrix: {node_matrix.__json__()}')
-            node_vector = node_matrix.pos # type: ignore
-            logging.info(f'node_vector: {node_vector.__json__()}')
-            transformation_vector = destination_vector - node_vector
-            logging.info(f'transformation_vector: ' + transformation_vector.__str__())
-            self.moveWaypointToDestination(transformation_vector, MarkerModel)
-            logging.info(f'\n')
+            destination_pos = self.getCoordsFromName(location)
+            if self.validDestinationPos(destination_pos):
+                destination_vector = self.repackVector3f(destination_pos)
+                logging.info(f'destination_vector: ' + destination_vector.__str__())
+                node_matrix = engine.GetNodeAbsoluteTransMatrix(MarkerModel)
+                logging.info(f'node_matrix: {node_matrix.__str__()}')
+                node_vector = node_matrix.pos # type: ignore
+                logging.info(f'node_vector: {node_vector.__json__()}')
+                transformation_vector = destination_vector - node_vector
+                logging.info(f'transformation_vector: ' + transformation_vector.__str__())
+                self.moveWaypointToDestination(transformation_vector, MarkerModel)
+                logging.info(f'\n')
+            else:
+                logging.error("That destination is not valid")
         except Exception as e:
                 logging.exception(e)
 
@@ -347,11 +398,53 @@ class WaypointManagerMod(NMSMod):
       vector.z = dict_a['z']
       return vector
 
+    def getCoordsFromName(self, location):
+        coords = {'x': 0, 'y': 0, 'z': 0}
+        for address in self.state.wpDict:
+            if self.state.wpDict[address].get(location):
+                coords = self.state.wpDict[address][location]
+        return coords
+    
+    def validDestinationPos(self, dest):
+        if dest['x'] == 0:
+            if dest['y'] == 0:
+                if dest['z'] == 0:
+                    return False
+        return True
+
 #------------------------------------------------------Displaying Waypoint Data--------------------------------------------------------------#
 
     def print_available_waypoints(self):
         dict = self.state.wpDict
-        count = 0
         logging.info(f'Available waypoints:')
-        for key in dict:
-            logging.info(f'{key}: {dict[key]}')
+        logging.info(f'\n{pprint.pformat(dict)}')
+
+#------------------------------------------------------Manage Solar System ID--------------------------------------------------------------#
+
+    def updateSolarSystemName(self):
+        name_buff = b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+        self.state.SolarSystemName = map_struct(name_buff, common.cTkFixedString[0x80])
+        call_function(
+            "cGcSolarSystem::GetName",
+            self.state.SolarSystem_ptr,
+            ctypes.addressof(self.state.SolarSystemName),
+        )
+    
+    def updateUniverseAddress(self):
+        mUniverseAddress_ptr = self.state.SolarSystem_ptr + 0x22E0
+        self.state.UniverseAddress = map_struct(mUniverseAddress_ptr, ctypes.c_uint64)
+
+    def getSolarSystemName(self):
+        name_buff = b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+        name = map_struct(name_buff, common.cTkFixedString[0x80])
+        call_function(
+            "cGcSolarSystem::GetName",
+            self.state.SolarSystem_ptr,
+            ctypes.addressof(name)
+        )
+        return name.__str__()
+    
+    def getUniverseAddress(self):
+        mUniverseAddress_ptr = self.state.SolarSystem_ptr + 0x22E0
+        universeAddress = map_struct(mUniverseAddress_ptr, ctypes.c_uint64)
+        return universeAddress
