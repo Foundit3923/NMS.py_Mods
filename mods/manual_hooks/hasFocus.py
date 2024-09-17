@@ -37,7 +37,7 @@ from nmspy.data.common import TkHandle, Vector3f, cTkMatrix34
 
 @dataclass
 class State_Vars(ModState):
-    application: nms_structs.cGcApplication = None
+    cTkSystem_ptr: int = 0
 
 @disable
 class hasFocus(NMSMod):
@@ -53,27 +53,56 @@ class hasFocus(NMSMod):
     def __init__(self):
         super().__init__()
         self.name = "hasFocus"
+        self.print = False
 
 
 #--------------------------------------------------------------------Hooks----------------------------------------------------------------------------#
 
     @main_loop.before
     def do_something(self):
-        #logging.info("do something")
+        if self.print:
+            self.getFocus()
     
-    #@one_shot
-    @manual_hook(
-            "cTkSystem::GameHasFocus",
-            pattern="40 55 53 56 41 55 41 56 48 8D AC 24 60",
-            func_def=FUNCDEF(
-              restype=ctypes.c_ubyte,  # bool
-              argtypes=[
-              ctypes.c_ulonglong,  # cTkSystem *
-              ]
-            ),
-            detour_time="after",
-    )
+    #@disable
+    @one_shot
+    @hooks.cTkSystem.GameHasFocus.after
     def gameHasFocus(self, this, _result_):
-        logging.info(f'Game Has Focus: {_result_}')
+        logging.info(f'----Game Has Focus: {_result_}----')
+        self.state.cTkSystem_ptr = this
 
+
+    @on_key_pressed('u')
+    def hasFocus(self):
+        logging.info("J key pressed")
+        #focus = call_function("cTkSystem::GameHasFocus", self.state.cTkSystem_ptr)
+        focus = call_function("glfwGetWindowAttrib", 
+                              self.state.cTkSystem_ptr + 50, 
+                              131073, 
+                              pattern="40 53 48 83 EC 20 83 3D ?? ?? ?? ?? ?? 48 8B D9 75 14", 
+                              func_def = FUNCDEF(
+                                  restype=ctypes.c_int32,  # int
+                                  argtypes=[
+                                      ctypes.c_ulonglong,  # cTkSystem *
+                                      ctypes.c_int32,      # int
+                                  ]
+                              ))
+        logging.info(f'Game focus: {focus}')
+
+    @on_key_pressed('n')
+    def press_k(self):
+        self.print = not self.print
+
+    def getFocus(self):
+        focus = call_function("glfwGetWindowAttrib", 
+                              self.state.cTkSystem_ptr + 50, 
+                              131073, 
+                              pattern="40 53 48 83 EC 20 83 3D ?? ?? ?? ?? ?? 48 8B D9 75 14", 
+                              func_def = FUNCDEF(
+                                  restype=ctypes.c_int32,  # int
+                                  argtypes=[
+                                      ctypes.c_ulonglong,  # cTkSystem *
+                                      ctypes.c_int32,      # int
+                                  ]
+                              ))
+        logging.info(f'Game focus: {focus}')
     
