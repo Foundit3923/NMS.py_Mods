@@ -296,7 +296,7 @@ class WaypointManagerMod(NMSMod):
         try:
           logging.info(f'Loading dict from local JSON file')
           logging.info(f'self.state.load("waypoint_data.json")')
-          self.state.load("waypoint_data.json")
+          self.state.load("waypoint_data.json", True)
         except FileNotFoundError:
             logging.info(f'self.updateJson()')
             self.updateJson()
